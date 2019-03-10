@@ -1,0 +1,1983 @@
+Microsoft (R) Macro Assembler Version 6.11		    11/02/18 08:59:48
+Keyping Time						     Page 1 - 1
+
+
+				; Name: Jack Scacco
+				; Assignment: Project6
+				; Due Date: 11-2-18
+				; File: keyping.asm
+
+				TITLE Keyping Time
+				.model tiny
+				.386
+ 0000				.code
+					org	100h
+
+ 0100				EntryPoint:
+ 0100  E9 0ABC				jmp	setup
+
+ = 001A				SYSTEM			= 1Ah
+ = 0002				SYSTEM_GETTIME		= 02h
+ = 0021				DOS 			= 21h
+ = 002C				DOS_GETTIME 		= 2Ch
+ = 4C00				DOS_EXIT 		= 4C00h
+ = 0010				BIOS 			= 10h
+ = 0009				BIOS_WRITE_COLOR_CHAR	= 09h
+ = 000A				BIOS_WRITE_CHAR 	= 0Ah
+ = 0003				BIOS_READ_CURSOR	= 03h
+ = 0002				BIOS_WRITE_CURSOR	= 02h
+ = 0008				BIOS_GETSCRCONTENTS	= 08h
+ = 000A				BIOS_SETSCRCONTENTS	= 0Ah
+ = 0009				KEYHANDLER		= 09h
+ = 0008				TIMERHANDLER		= 08h
+ = 3100				TSR			= 3100h
+ = 4900				EXIT_TSR		= 4900h
+ = 004D				GET_RETURN_CODE		= 4Dh
+ = 6200				PSPPOINTER		= 6200h
+ = 0080				CMDTAIL			= 80h
+ = 0040				KEY_INFO_SEGMENT	= 40h
+ = 0017				KEY_INFO_OFFSET		= 17h
+ = 000D				COLOR			= 13
+
+				; --------------------
+				;|                    |
+				;|   	  Data        |
+				;|    Declarations    |
+				;|                    |
+				; --------------------
+
+ 0103 0000			OldKeyDS	WORD	0
+ 0105 0000			OldKeySS	WORD	0
+ 0107 0000			OldKeySP	WORD	0
+ 0109 0000			OldTimerDS	WORD	0
+ 010B 0000			OldTimerSS	WORD	0
+ 010D 0000			OldTimerSP	WORD	0
+ 010F  0064 [			MySetupStack	WORD	100 dup(?)
+        0000
+       ]
+ 01D7				MySetupSP	LABEL	WORD
+ 01D7  0064 [			MyKeyStack	WORD	100 dup(?)
+        0000
+       ]
+ 029F				MyKeySP		LABEL	WORD
+ 029F  0064 [			MyTimerStack	WORD	100 dup(?)
+        0000
+       ]
+ 0367				MyTimerSP	LABEL	WORD
+ 0367  0082 [			CmdLine		BYTE	130 dup(0)
+        00
+       ]
+
+ 03E9				OldKeyboardHandler 	LABEL	DWORD
+ 03E9 0000			OldKeyboardOffset	WORD	0
+ 03EB 0000			OldKeyboardSegment 	WORD	0
+ 03ED				OldTimerHandler 	LABEL	DWORD
+ 03ED 0000			OldTimerOffset		WORD	0
+ 03EF 0000			OldTimerSegment 	WORD	0
+ 03F1				SystemTime		LABEL	WORD
+ 03F1 00			SystemHours		BYTE	0
+ 03F2 00			SystemMinutes		BYTE	0
+ 03F3 00			SystemSeconds		BYTE	0
+ 03F4 00			SystemDLSavings		BYTE	0
+ 03F5  000B [			OldScreenData		BYTE 	11 	dup(0)
+        00
+       ]
+ 0400 00			ShouldPrintTime		BYTE	0
+ 0401 00			ExitSequencePressed	BYTE	0
+
+ 0402 44 41 4E 49 45 4C		AlreadyLoadedArray	BYTE	"DANIELLE", 0
+       4C 45 00
+ 040B 00			AlreadyLoadedflag	BYTE	0
+
+				; --------------------
+				;|                    |
+				;|    WriteString     |
+				;|     (et. all)      |
+				;|                    |
+				; --------------------
+
+ 040C				WriteChar PROC
+				; Writes the character in dl
+ 040C  50				push	ax
+ 040D  53				push	bx
+ 040E  51				push	cx
+ 040F  9C				pushf
+
+ 0410  8A C2				mov	al, dl			; AL = char to write
+ 0412  B4 0A				mov	ah, BIOS_WRITE_CHAR	; AH = interrupt
+ 0414  B7 00				mov	bh, 0			; BH = video page
+ 0416  B9 0001				mov	cx, 1			; CX = num. times to write
+ 0419  CD 10				int	BIOS			; write the character
+
+ 041B  E8 001E				call	AdvanceCursor
+
+ 041E  9D				popf
+ 041F  59				pop	cx
+ 0420  5B				pop	bx
+ 0421  58				pop	ax
+ 0422  C3				ret
+ 0423				WriteChar ENDP
+
+ 0423				WriteColorChar PROC
+				; Writes the character in dl in a fancy color
+ 0423  50				push	ax
+ 0424  53				push	bx
+ 0425  51				push	cx
+ 0426  9C				pushf
+
+ 0427  8A C2				mov	al, dl			; AL = char to write
+ 0429  B4 09				mov	ah, BIOS_WRITE_COLOR_CHAR	; AH = interrupt
+ 042B  B7 00				mov	bh, 0			; BH = video page
+ 042D  B3 0D				mov	bl, COLOR
+ 042F  B9 0001				mov	cx, 1			; CX = num. times to write
+ 0432  CD 10				int	BIOS			; write the character
+
+ 0434  E8 0005				call	AdvanceCursor
+
+ 0437  9D				popf
+ 0438  59				pop	cx
+ 0439  5B				pop	bx
+ 043A  58				pop	ax
+ 043B  C3				ret
+ 043C				WriteColorChar ENDP
+
+ 043C				AdvanceCursor PROC
+				; Advances the cursor one space forward.
+ 043C  50				push	ax
+ 043D  53				push	bx
+ 043E  51				push	cx
+ 043F  52				push	dx
+ 0440  9C				pushf
+
+ 0441  B7 00				mov	bh, 0			; BH = video page
+ 0443  B4 03				mov	ah, BIOS_READ_CURSOR	; AH = interrupt
+ 0445  CD 10				int	BIOS			; DH = row, DL = column
+
+ 0447  FE C2				inc	DL			; DL = new column
+ 0449  B4 02				mov	ah, BIOS_WRITE_CURSOR	; AH = interrupt
+ 044B  CD 10				int	BIOS
+
+ 044D  9D				popf
+ 044E  5A				pop	dx
+ 044F  59				pop	cx
+ 0450  5B				pop	bx
+ 0451  58				pop	ax
+ 0452  C3				ret
+ 0453				AdvanceCursor ENDP
+
+ 0453				WriteString PROC
+				; Writes the string whose offset is in dx.
+ 0453  52				push	dx
+ 0454  56				push	si
+ 0455  9C				pushf
+
+ 0456  8B F2				mov	si, dx
+ 0458  EB 04				jmp	cond
+ 045A				top:
+ 045A  E8 FFAF				call	WriteChar
+ 045D  46				inc	si
+ 045E				cond:
+ 045E  8A 14				mov	dl, [si]
+ 0460  80 FA 00				cmp	dl, 0
+ 0463  77 F5				ja	top
+
+ 0465  9D				popf
+ 0466  5E				pop	si
+ 0467  5A				pop	dx
+ 0468  C3				ret
+ 0469				WriteString ENDP
+
+ 0469				WriteColorString PROC
+				; Writes the string whose offset is in dx.
+ 0469  52				push	dx
+ 046A  56				push	si
+ 046B  9C				pushf
+
+ 046C  8B F2				mov	si, dx
+ 046E  EB 04				jmp	cond
+ 0470				top:
+ 0470  E8 FFB0				call	WriteColorChar
+ 0473  46				inc	si
+ 0474				cond:
+ 0474  8A 14				mov	dl, [si]
+ 0476  80 FA 00				cmp	dl, 0
+ 0479  77 F5				ja	top
+
+ 047B  9D				popf
+ 047C  5E				pop	si
+ 047D  5A				pop	dx
+ 047E  C3				ret
+ 047F				WriteColorString ENDP
+
+ 047F				NewLine PROC
+				; Prints a newline.
+				; This function is only used in testing.
+ 047F  50				push	ax
+ 0480  52				push	dx
+ 0481  9C				pushf
+
+ 0482  B4 02				mov	ah, 02h	; PrintCharacter DOS interrupt
+ 0484  B2 0D				mov	dl, 13
+ 0486  CD 21				int	DOS
+					
+ 0488  B2 0A				mov	dl, 10
+ 048A  CD 21				int	DOS
+
+ 048C  9D				popf	
+ 048D  5A				pop	dx
+ 048E  58				pop	ax
+ 048F  C3				ret
+ 0490				NewLine ENDP
+
+				; --------------------
+				;|                    |
+				;|      HexOut        |
+				;|     (et. all)      |
+				;|                    |
+				; --------------------
+
+ 0490 30 31 32 33 34 35		hexArray BYTE "0123456789ABCDEF", 0
+       36 37 38 39 41 42
+       43 44 45 46 00
+
+ 04A1				WriteHexDigit PROC
+				; Writes the lower hex digit in dl
+ 04A1  50				push	ax
+ 04A2  53				push	bx
+ 04A3  51				push	cx
+ 04A4  52				push	dx
+ 04A5  56				push	si
+ 04A6  9C				pushf
+
+ 04A7  8B DA				mov	bx, dx
+ 04A9  83 E3 0F				and	bx, 000Fh
+ 04AC  BE 0490 R			mov	si, OFFSET hexArray
+ 04AF  8A 00				mov	al, [si + bx]		; AL = char to write
+ 04B1  B4 0A				mov	ah, BIOS_WRITE_CHAR	; AH = interrupt
+ 04B3  B7 00				mov	bh, 0			; BH = video page
+ 04B5  B9 0001				mov	cx, 1			; CX = num. times to write
+ 04B8  CD 10				int	BIOS			; write the character
+
+ 04BA  E8 FF7F				call	AdvanceCursor
+
+ 04BD  9D				popf
+ 04BE  5E				pop	si
+ 04BF  5A				pop	dx
+ 04C0  59				pop	cx
+ 04C1  5B				pop	bx
+ 04C2  58				pop	ax
+ 04C3  C3				ret
+ 04C4				WriteHexDigit ENDP
+
+ 04C4				WriteColorHexDigit PROC
+				; Writes the lower hex digit in dl
+ 04C4  50				push	ax
+ 04C5  53				push	bx
+ 04C6  51				push	cx
+ 04C7  52				push	dx
+ 04C8  56				push	si
+ 04C9  9C				pushf
+
+ 04CA  8B DA				mov	bx, dx
+ 04CC  83 E3 0F				and	bx, 000Fh
+ 04CF  BE 0490 R			mov	si, OFFSET hexArray
+ 04D2  8A 00				mov	al, [si + bx]			; AL = char to write
+ 04D4  B4 09				mov	ah, BIOS_WRITE_COLOR_CHAR	; AH = interrupt
+ 04D6  B7 00				mov	bh, 0				; BH = video page
+ 04D8  B3 0D				mov	bl, COLOR
+ 04DA  B9 0001				mov	cx, 1				; CX = num. times to write
+ 04DD  CD 10				int	BIOS				; write the character
+
+ 04DF  E8 FF5A				call	AdvanceCursor
+
+ 04E2  9D				popf
+ 04E3  5E				pop	si
+ 04E4  5A				pop	dx
+ 04E5  59				pop	cx
+ 04E6  5B				pop	bx
+ 04E7  58				pop	ax
+ 04E8  C3				ret
+ 04E9				WriteColorHexDigit ENDP
+
+ 04E9				HexOut PROC
+				; Expects the value in edx and the length (in bytes) in cx (between 1 and 4)
+
+ 04E9  50				push	ax
+ 04EA  53				push	bx
+ 04EB  51				push	cx
+ 04EC  66| 52				push	edx
+ 04EE  66| 56				push	esi
+ 04F0  9C				pushf
+
+ 04F1  8B D9				mov	bx, cx		; Keep track of count here, we need cl for shr
+ 04F3  66| 8B F2			mov	esi, edx	; Store the original value in esi
+ 04F6  EB 21				jmp	cond
+
+ 04F8				top:
+ 04F8  8A CB				mov	cl, bl		; Do math to take care of little-endian
+ 04FA  FE C9				dec	cl
+ 04FC  B0 08				mov	al, 8
+ 04FE  F6 E1				mul	cl
+ 0500  8A C8				mov	cl, al		; End Math (now cl is the shifting amount)
+
+ 0502  66| 8B D6			mov	edx, esi
+ 0505  66| D3 EA			shr	edx, cl
+ 0508  66| C1 EA 04			shr	edx, 4		; Isolate the top nybble
+ 050C  E8 FF92				call	WriteHexDigit	; Write the first hex digit
+
+ 050F  66| 8B D6			mov	edx, esi
+ 0512  66| D3 EA			shr	edx, cl		; Little Endian again
+ 0515  E8 FF89				call	WriteHexDigit	; Write the second hex digit
+
+ 0518  4B				dec	bx
+ 0519				cond:
+ 0519  83 FB 00				cmp	bx, 0
+ 051C  77 DA				ja	top
+
+ 051E  9D				popf
+ 051F  66| 5E				pop	esi
+ 0521  66| 5A				pop	edx
+ 0523  59				pop	cx
+ 0524  5B				pop	bx
+ 0525  58				pop	ax
+ 0526  C3				ret
+ 0527				HexOut ENDP
+
+ 0527				ColorHexOut PROC
+				; Expects the value in edx and the length (in bytes) in cx (between 1 and 4)
+
+ 0527  50				push	ax
+ 0528  53				push	bx
+ 0529  51				push	cx
+ 052A  66| 52				push	edx
+ 052C  66| 56				push	esi
+ 052E  9C				pushf
+
+ 052F  8B D9				mov	bx, cx		; Keep track of count here, we need cl for shr
+ 0531  66| 8B F2			mov	esi, edx	; Store the original value in esi
+ 0534  EB 21				jmp	cond
+
+ 0536				top:
+ 0536  8A CB				mov	cl, bl		; Do math to take care of little-endian
+ 0538  FE C9				dec	cl
+ 053A  B0 08				mov	al, 8
+ 053C  F6 E1				mul	cl
+ 053E  8A C8				mov	cl, al		; End Math (now cl is the shifting amount)
+
+ 0540  66| 8B D6			mov	edx, esi
+ 0543  66| D3 EA			shr	edx, cl
+ 0546  66| C1 EA 04			shr	edx, 4		; Isolate the top nybble
+ 054A  E8 FF77				call	WriteColorHexDigit	; Write the first hex digit
+
+ 054D  66| 8B D6			mov	edx, esi
+ 0550  66| D3 EA			shr	edx, cl		; Little Endian again
+ 0553  E8 FF6E				call	WriteColorHexDigit	; Write the second hex digit
+
+ 0556  4B				dec	bx
+ 0557				cond:
+ 0557  83 FB 00				cmp	bx, 0
+ 055A  77 DA				ja	top
+
+ 055C  9D				popf
+ 055D  66| 5E				pop	esi
+ 055F  66| 5A				pop	edx
+ 0561  59				pop	cx
+ 0562  5B				pop	bx
+ 0563  58				pop	ax
+ 0564  C3				ret
+ 0565				ColorHexOut ENDP
+
+ 0565				WriteHexByte PROC
+				; Prints the hex digits of the byte whose value is in dl.
+ 0565  51				push	cx
+ 0566  9C				pushf
+
+ 0567  B9 0001				mov	cx, 1
+ 056A  E8 FF7C				call	HexOut
+					
+ 056D  9D				popf
+ 056E  59				pop	cx
+ 056F  C3				ret
+ 0570				WriteHexByte ENDP
+
+ 0570				WriteColorHexByte PROC
+				; Prints the hex digits of the byte whose value is in dl.
+ 0570  51				push	cx
+ 0571  9C				pushf
+
+ 0572  B9 0001				mov	cx, 1
+ 0575  E8 FFAF				call	ColorHexOut
+					
+ 0578  9D				popf
+ 0579  59				pop	cx
+ 057A  C3				ret
+ 057B				WriteColorHexByte ENDP
+
+ 057B				WriteHexWord PROC
+				; Prints the hex digits of the word whose value is in dx.
+ 057B  51				push	cx
+ 057C  9C				pushf	
+
+ 057D  B9 0002				mov	cx, 2
+ 0580  E8 FF66				call	HexOut
+					
+ 0583  9D				popf
+ 0584  59				pop	cx
+ 0585  C3				ret
+ 0586				WriteHexWord ENDP
+
+ 0586				WriteHexLong PROC
+				; Prints the hex digits of the double word whose value isin edx.
+ 0586  51				push	cx
+ 0587  9C				pushf	
+
+ 0588  B9 0004				mov	cx, 4
+ 058B  E8 FF5B				call	HexOut
+					
+ 058E  9D				popf
+ 058F  59				pop	cx
+ 0590  C3				ret
+ 0591				WriteHexLong ENDP
+
+				; --------------------------
+				;|                          |
+				;|        Get Time          |
+				;|                          |
+				; --------------------------
+
+ 0591				GetSystemTime PROC
+				; Retrieves the system time and places it in memory
+
+ 0591  50				push	ax
+ 0592  51				push	cx
+ 0593  52				push	dx
+ 0594  9C				pushf
+
+					; CH = hours
+					; CL = minutes
+					; DH = seconds
+					; DL = d.l. savings flag
+ 0595  B4 02				mov	ah, SYSTEM_GETTIME
+ 0597  CD 1A				int	SYSTEM
+ 0599  88 2E 03F1 R			mov	SystemHours, ch
+ 059D  88 0E 03F2 R			mov	SystemMinutes, cl
+ 05A1  88 36 03F3 R			mov	SystemSeconds, dh
+ 05A5  88 16 03F4 R			mov	SystemDLSavings, dl
+
+ 05A9  9D				popf
+ 05AA  5A				pop	dx
+ 05AB  59				pop	cx
+ 05AC  58				pop	ax	
+ 05AD  C3				ret
+ 05AE				GetSystemTime ENDP
+
+				; --------------------------
+				;|                          |
+				;|       Print Time         |
+				;|                          |
+				; --------------------------
+ 05AE 41 4D 00			SystemHourLabel BYTE "AM", 0
+
+ 05B1				PrintSystemTime PROC
+				; Prints the time stored in memory
+
+ 05B1  52				push	dx
+ 05B2  9C				pushf
+					
+ 05B3  C6 06 05AE R 41			mov	SystemHourLabel, "A"
+ 05B8  C6 06 05AF R 4D			mov	SystemHourLabel + 1, "M"
+ 05BD  C6 06 05B0 R 00			mov	SystemHourLabel + 2, 0
+
+ 05C2  8A 16 03F1 R			mov	dl, SystemHours
+ 05C6  80 FA 12				cmp	dl, 12h
+ 05C9  76 1C				jna	am
+ 05CB  C6 06 05AE R 50			mov	SystemHourLabel, "P"
+ 05D0  80 FA 19				cmp	dl, 19h
+ 05D3  77 05				ja	special
+ 05D5  80 EA 12				sub	dl, 12h
+ 05D8  EB 0D				jmp	am
+
+ 05DA				special:
+ 05DA  80 FA 21				cmp	dl, 21h
+ 05DD  77 05				ja	special2
+ 05DF  80 EA 18				sub	dl, 18h
+ 05E2  EB 03				jmp	am
+					
+ 05E4				special2:
+ 05E4  80 EA 12				sub	dl, 12h
+ 05E7				am:
+ 05E7  E8 FF86				call	WriteColorHexByte
+ 05EA  B2 3A				mov	dl, ":"
+ 05EC  E8 FE34				call	WriteColorChar
+
+ 05EF  8A 16 03F2 R			mov	dl, SystemMinutes
+ 05F3  E8 FF7A				call	WriteColorHexByte
+ 05F6  B2 3A				mov	dl, ":"
+ 05F8  E8 FE28				call	WriteColorChar
+
+ 05FB  8A 16 03F3 R			mov	dl, SystemSeconds
+ 05FF  E8 FF6E				call	WriteColorHexByte
+
+ 0602  BA 05AE R			mov	dx, OFFSET SystemHourLabel
+ 0605  E8 FE61				call	WriteColorString
+
+ 0608  9D				popf
+ 0609  5A				pop	dx
+ 060A  C3				ret
+ 060B				PrintSystemTime ENDP
+
+				; --------------------------
+				;|                          |
+				;|     Cursor Routines      |
+				;|                          |
+				; --------------------------
+
+ 060B				GetCursorLoc  PROC
+				; Gets the cursor location. Puts the coords in dx.
+ 060B  50				push	ax
+ 060C  53				push	bx
+ 060D  51				push	cx
+ 060E  9C				pushf
+
+ 060F  B4 03				mov	ah, BIOS_READ_CURSOR
+ 0611  B7 00				mov	bh, 0
+ 0613  CD 10				int	BIOS
+
+ 0615  9D				popf
+ 0616  59				pop	cx
+ 0617  5B				pop	bx
+ 0618  58				pop	ax
+ 0619  C3				ret
+ 061A				GetCursorLoc ENDP
+
+ 061A				SetCursorLoc  PROC
+				; Restore cursor location. Expects loc in dx
+ 061A  50				push	ax
+ 061B  53				push	bx
+ 061C  51				push	cx
+ 061D  52				push	dx
+ 061E  9C				pushf
+
+ 061F  B4 02				mov	ah, BIOS_WRITE_CURSOR
+ 0621  B7 00				mov	bh, 0
+ 0623  CD 10				int	BIOS
+
+ 0625  9D				popf
+ 0626  5A				pop	dx
+ 0627  59				pop	cx
+ 0628  5B				pop	bx
+ 0629  58				pop	ax
+ 062A  C3				ret
+ 062B				SetCursorLoc ENDP
+
+ 062B				CursorToTopRight PROC
+ 062B  50				push	ax
+ 062C  53				push	bx
+ 062D  51				push	cx
+ 062E  52				push	dx
+ 062F  9C				pushf
+
+					; Set cursor location
+ 0630  B4 02				mov	ah, BIOS_WRITE_CURSOR
+ 0632  B7 00				mov	bh, 0
+ 0634  B6 00				mov	dh, 00
+ 0636  B2 46				mov	dl, 70
+ 0638  CD 10				int	BIOS
+						
+ 063A  9D				popf
+ 063B  5A				pop	dx
+ 063C  59				pop	cx
+ 063D  5B				pop	bx
+ 063E  58				pop	ax
+ 063F  C3				ret
+ 0640				CursorToTopRight ENDP
+
+				; --------------------------
+				;|                          |
+				;|      Display Time        |
+				;|                          |
+				; --------------------------
+
+ 0640				DisplayTime PROC
+				; Moves the cursor to the top right of the screen and prints the time there.
+ 0640  50				push	ax
+ 0641  53				push	bx
+ 0642  51				push	cx
+ 0643  52				push	dx
+ 0644  9C				pushf
+
+ 0645  E8 FFC3				call	GetCursorLoc
+ 0648  52				push	dx
+ 0649  E8 FFDF				call	CursorToTopRight
+ 064C  E8 FF62				call	PrintSystemTime
+ 064F  5A				pop	dx
+ 0650  E8 FFC7				call	SetCursorLoc
+					
+ 0653  9D				popf
+ 0654  5A				pop	dx
+ 0655  59				pop	cx
+ 0656  5B				pop	bx
+ 0657  58				pop	ax
+ 0658  C3				ret
+ 0659				DisplayTime ENDP
+
+				; --------------------------
+				;|                          |
+				;|    Save Screen Data      |
+				;|                          |
+				; --------------------------
+
+ 0659				StoreScreenData PROC
+				; Fetches the information on the screen at the spot the time is displayed.
+
+ 0659  50				push	ax
+ 065A  53				push	bx
+ 065B  51				push	cx
+ 065C  52				push	dx
+ 065D  57				push	di
+ 065E  9C				pushf	
+
+ 065F  E8 FFA9				call	GetCursorLoc
+ 0662  52				push	dx
+ 0663  E8 FFC5				call	CursorToTopRight
+
+ 0666  BF 03F5 R			mov	di, OFFSET OldScreenData
+ 0669  B9 000A				mov	cx, 10
+ 066C				top:
+					; Get the character at the current location
+ 066C  B4 08				mov	ah, BIOS_GETSCRCONTENTS
+ 066E  B7 00				mov	bh, 00h
+ 0670  CD 10				int	BIOS
+ 0672  88 05				mov	[di], al			; Copy the character over.
+ 0674  E8 FDC5				call	AdvanceCursor
+ 0677  47				inc	di
+ 0678  49				dec	cx
+ 0679  83 F9 00				cmp	cx, 0
+ 067C  77 EE				ja	top
+					
+ 067E  5A				pop	dx
+ 067F  E8 FF98				call	SetCursorLoc
+
+ 0682  9D				popf
+ 0683  5F				pop	di
+ 0684  5A				pop	dx
+ 0685  59				pop	cx
+ 0686  5B				pop	bx
+ 0687  58				pop	ax
+ 0688  C3				ret
+ 0689				StoreScreenData ENDP
+
+				; --------------------------
+				;|                          |
+				;|    Restore Screen Data   |
+				;|                          |
+				; --------------------------
+
+ 0689				RestoreScreenData PROC
+				; Restores that which was at the top of the screen before the time was output.
+
+ 0689  50				push	ax
+ 068A  53				push	bx
+ 068B  51				push	cx
+ 068C  52				push	dx
+ 068D  56				push	si
+ 068E  9C				pushf
+
+ 068F  E8 FF79				call	GetCursorLoc
+ 0692  52				push	dx
+ 0693  E8 FF95				call	CursorToTopRight
+ 0696  BA 03F5 R			mov	dx, OFFSET OldScreenData
+ 0699  E8 FDB7				call	WriteString
+ 069C  5A				pop	dx
+ 069D  E8 FF7A				call	SetCursorLoc
+
+ 06A0  9D				popf	
+ 06A1  5E				pop	si
+ 06A2  5A				pop	dx
+ 06A3  59				pop	cx
+ 06A4  5B				pop	bx
+ 06A5  58				pop	ax
+ 06A6  C3				ret
+ 06A7				RestoreScreenData ENDP
+
+				; --------------------------
+				;|                          |
+				;|  	 Check Exit         |
+				;|    Sequence Pressed      |
+				;|                          |
+				; --------------------------
+
+ 06A7				CheckExitSequencePressed PROC
+				; Checks if control and both shifts are currently pressed.
+				; Output:
+				; AL = 0 when it is not pressed
+				; AL = 1 when it is pressed
+
+ 06A7  52				push	dx
+ 06A8  06				push	es
+ 06A9  56				push	si
+ 06AA  9C				pushf
+
+					; Load the location of the keyboard information array
+ 06AB  BA 0040				mov	dx, KEY_INFO_SEGMENT
+ 06AE  8E C2				mov	es, dx
+ 06B0  BE 0017				mov	si, KEY_INFO_OFFSET
+					; Fetch the keyboard information array
+ 06B3  26: 8B 14			mov	dx, ES:[si]
+ 06B6  83 E2 07				and	dx, 00000111b
+ 06B9  83 FA 07				cmp	dx, 00000111b
+ 06BC  75 04				jnz	not_pressed
+ 06BE				pressed:
+ 06BE  B0 01				mov	al, 1
+ 06C0  EB 02				jmp	done
+ 06C2				not_pressed:
+ 06C2  B0 00				mov	al, 0
+ 06C4				done:
+ 06C4  9D				popf	
+ 06C5  5E				pop	si
+ 06C6  07				pop	es
+ 06C7  5A				pop	dx	
+ 06C8  C3				ret
+ 06C9				CheckExitSequencePressed ENDP
+
+				; --------------------------
+				;|                          |
+				;|     Shifts Pressed       |
+				;|                          |
+				; --------------------------
+
+ 06C9				ShiftsPressed PROC
+				; Checks if both shifts are currently pressed.
+				; Output:
+				; AL = 0 when they are not pressed
+				; AL = 1 when they are pressed
+
+ 06C9  52				push	dx
+ 06CA  06				push	es
+ 06CB  56				push	si
+ 06CC  9C				pushf
+
+					; Load the location of the keyboard information array
+ 06CD  BA 0040				mov	dx, KEY_INFO_SEGMENT
+ 06D0  8E C2				mov	es, dx
+ 06D2  BE 0017				mov	si, KEY_INFO_OFFSET
+					; Fetch the keyboard information array
+ 06D5  26: 8B 14			mov	dx, ES:[si]
+ 06D8  83 E2 03				and	dx, 00000011b
+ 06DB  83 FA 03				cmp	dx, 00000011b
+ 06DE  75 04				jnz	not_pressed
+ 06E0				pressed:
+ 06E0  B0 01				mov	al, 1
+ 06E2  EB 02				jmp	done
+ 06E4				not_pressed:
+ 06E4  B0 00				mov	al, 0
+ 06E6				done:
+ 06E6  9D				popf	
+ 06E7  5E				pop	si
+ 06E8  07				pop	es
+ 06E9  5A				pop	dx	
+ 06EA  C3				ret
+ 06EB				ShiftsPressed ENDP
+
+				; --------------------------
+				;|                          |
+				;| Switch Should Print Time |
+				;|                          |
+				; --------------------------
+
+ 06EB				SwitchShouldPrintTime PROC
+				; Switches the byte that dictates whether or not we print the time.
+
+ 06EB  9C				pushf
+
+ 06EC  80 3E 0400 R 00			cmp	ShouldPrintTime, 0
+ 06F1  74 0A				jz	to_one
+ 06F3				to_zero:
+ 06F3  E8 FF93				call	RestoreScreenData
+ 06F6  C6 06 0400 R 00			mov	ShouldPrintTime, 0
+ 06FB  EB 08				jmp	done
+ 06FD				to_one:
+ 06FD  E8 FF59				call	StoreScreenData
+ 0700  C6 06 0400 R 01			mov	ShouldPrintTime, 1
+
+ 0705				done:
+ 0705  9D				popf
+ 0706  C3				ret
+ 0707				SwitchShouldPrintTime ENDP
+
+				; --------------------------
+				;|                          |
+				;|       My Handlers        |
+				;|                          |
+				; --------------------------
+
+ 0707 45 78 69 74 20 73		ControlMessage BYTE "Exit sequence invoked! Terminating program.", 0
+       65 71 75 65 6E 63
+       65 20 69 6E 76 6F
+       6B 65 64 21 20 54
+       65 72 6D 69 6E 61
+       74 69 6E 67 20 70
+       72 6F 67 72 61 6D
+       2E 00
+
+ 0733				MyKeyboardHandler PROC
+				; This is my keyboard handler! It needs to hook in the old one at the end.
+ 0733  FA				cli
+ 0734  2E: 89 26 0107 R			mov	CS:OldKeySP, sp
+ 0739  2E: 8C 16 0105 R			mov	CS:OldKeySS, ss
+ 073E  2E: 8C 1E 0103 R			mov	CS:OldKeyDS, ds
+
+ 0743  FB				sti
+ 0744  0E				push	cs
+ 0745  1F				pop	ds
+ 0746  0E				push	cs
+ 0747  17				pop	ss
+ 0748  BC 029F R			mov	sp, OFFSET MyKeySP
+ 074B  FA				cli
+
+ 074C  50				push	ax
+ 074D  52				push	dx
+ 074E  9C				pushf
+
+ 074F				shifts:
+ 074F  E8 FF77				call	ShiftsPressed
+ 0752  3C 01				cmp	al, 1
+ 0754  75 10				jnz	done
+ 0756  E8 FF92				call	SwitchShouldPrintTime
+ 0759  EB 0B				jmp	done
+
+ 075B				quit:
+ 075B  C6 06 0401 R 01			mov	ExitSequencePressed, 1
+ 0760  BA 0707 R			mov	dx, OFFSET ControlMessage
+ 0763  E8 FCED				call	WriteString
+ 0766				done:
+ 0766  9D				popf
+ 0767  5A				pop	dx
+ 0768  58				pop	ax
+					
+ 0769  FB				sti
+ 076A  2E: 8E 16 0105 R			mov	ss, CS:OldKeySS
+ 076F  2E: 8B 26 0107 R			mov	sp, CS:OldKeySP
+ 0774  2E: 8E 1E 0103 R			mov	ds, CS:OldKeyDS
+ 0779  2E: FF 2E 03E9 R			jmp	DWORD PTR cs:OldKeyboardHandler
+ 077E				MyKeyboardHandler ENDP
+
+ 077E				MyTimerHandler PROC
+				; This is my timer handler! It needs to hook in the old one at the end.
+ 077E  FA				cli
+ 077F  2E: 8C 16 010B R			mov	CS:OldTimerSS, ss
+ 0784  2E: 89 26 010D R			mov	CS:OldTimerSP, sp
+ 0789  2E: 8C 1E 0109 R			mov	CS:OldTimerDS, ds
+
+ 078E  FB				sti
+ 078F  0E				push	cs
+ 0790  1F				pop	ds
+ 0791  0E				push	cs
+ 0792  17				pop	ss
+ 0793  BC 0367 R			mov	sp, OFFSET MyTimerSP
+ 0796  FA				cli
+
+ 0797  50				push	ax
+ 0798  53				push	bx
+ 0799  51				push	cx
+ 079A  52				push	dx
+ 079B  9C				pushf
+
+ 079C  E8 FDF2				call	GetSystemTime
+					
+ 079F  80 3E 0400 R 01			cmp	ShouldPrintTime, 1
+ 07A4  74 08				jz	pressed
+
+ 07A6				not_pressed:
+ 07A6  E8 FEB0				call	StoreScreenData
+ 07A9  E8 FEDD				call	RestoreScreenData
+ 07AC  EB 03				jmp	done
+ 07AE				pressed:
+ 07AE  E8 FE8F				call	DisplayTime
+ 07B1				done:
+ 07B1  9D				popf
+ 07B2  5A				pop	dx
+ 07B3  59				pop	cx
+ 07B4  5B				pop	bx
+ 07B5  58				pop	ax
+
+ 07B6  FB				sti
+ 07B7  2E: 8E 16 010B R			mov	ss, CS:OldTimerSS
+ 07BC  2E: 8B 26 010D R			mov	sp, CS:OldTimerSP
+ 07C1  2E: 8E 1E 0109 R			mov	ds, CS:OldTimerDS
+ 07C6  2E: FF 2E 03ED R			jmp	DWORD PTR cs:OldTimerHandler
+ 07CB				MyTimerHandler ENDP
+
+				; --------------------
+				;|                    |
+				;|   Show Interrupt   |
+				;|       Vector	      |
+				;|                    |
+				; --------------------
+
+ 07CB				ShowInterruptVector PROC
+				; Takes a number on the stack an prints out the corresponging data in the IVT.
+ 07CB  55				push	bp
+ 07CC  8B EC				mov	bp, sp
+
+ 07CE  51				push	cx
+ 07CF  52				push	dx
+ 07D0  06				push	es
+ 07D1  56				push	si
+
+ = 0004					ivt_number = 4
+ 07D2  8B 76 04				mov	si, [bp + ivt_number]
+ 07D5  C1 E6 02				shl	si, 2			; Set IVT (mul. by 4 b/c width of IVT)
+ 07D8  BA 0000				mov	dx, 0
+ 07DB  8E C2				mov	es, dx			; Set IVT segment
+
+ 07DD  66| 26: 8B 14			mov	edx, ES:[si]
+ 07E1  B1 10				mov	cl, 16
+ 07E3  66| C1 EA 10			shr	edx, 16
+ 07E7  E8 FD91				call	WriteHexWord
+
+ 07EA  B2 3A				mov	dl, ":"
+ 07EC  E8 FC1D				call	WriteChar
+
+ 07EF  66| 26: 8B 14			mov	edx, ES:[si]
+ 07F3  E8 FD85				call	WriteHexWord
+
+ 07F6  5E				pop	si
+ 07F7  07				pop	es
+ 07F8  5A				pop	dx
+ 07F9  59				pop	cx
+ 07FA  5D				pop	bp
+ 07FB  C3				ret
+ 07FC				ShowInterruptVector ENDP
+
+				; --------------------
+				;|                    |
+				;|    Get Interrupt   |
+				;|       Vector	      |
+				;|                    |
+				; --------------------
+
+ 07FC				GetInterruptVector PROC
+				; Expects the following on the stack, sets the IVT based on this info:
+				; SP -> data_offset
+				;	ivt_number
+				;	ret. addr
+
+ = 0004					data_offset	= 4
+ = 0006					ivt_number	= 6
+
+ 07FC  55				push	bp
+ 07FD  8B EC				mov	bp, sp
+
+ 07FF  51				push	cx
+ 0800  52				push	dx
+ 0801  57				push	di
+ 0802  56				push	si
+ 0803  1E				push	ds
+ 0804  06				push	es
+ 0805  9C				pushf
+
+					; DS = IVT segment
+					; SI = IVT num
+ 0806  8B 76 06				mov	si, [bp + ivt_number]
+ 0809  C1 E6 02				shl	si, 2
+ 080C  BA 0000				mov	dx, 0
+ 080F  8E DA				mov	ds, dx			; set ds to ivt segment
+
+					; ES = CS
+ 0811  8C CA				mov	dx, cs
+ 0813  8E C2				mov	es, dx
+
+					; DI = mem location
+ 0815  8B 7E 04				mov	di, [bp + data_offset]
+
+ 0818  B9 0002				mov	cx, 2
+ 081B  FC				cld
+ 081C  FA				cli				; prevent interrupts
+
+ 081D  F3/ A5				rep	movsw
+
+ 081F  FB				sti				; allow for interrupts
+
+ 0820  9D				popf
+ 0821  07				pop	es
+ 0822  1F				pop	ds
+ 0823  5E				pop	si
+ 0824  5F				pop	di
+ 0825  5A				pop	dx
+ 0826  59				pop	cx
+ 0827  5D				pop	bp
+ 0828  C3				ret
+ 0829				GetInterruptVector ENDP
+
+				; --------------------
+				;|                    |
+				;|    Set Interrupt   |
+				;|       Vector	      |
+				;|                    |
+				; --------------------
+
+ 0829				SetInterruptVector PROC
+				; Expects the following on the stack, sets the IVT based on this info:
+				; SP -> ivt_offset
+				;	ivt_segment
+				;	ivt_number
+				;	ret. addr
+
+ = 0004					ivt_offset	= 4
+ = 0006					ivt_segment	= 6
+ = 0008					ivt_number	= 8
+
+ 0829  55				push	bp
+ 082A  8B EC				mov	bp, sp
+
+ 082C  51				push	cx
+ 082D  52				push	dx
+ 082E  57				push	di
+ 082F  56				push	si
+ 0830  1E				push	ds
+ 0831  06				push	es
+ 0832  9C				pushf
+
+ 0833  8B 4E 06				mov	cx, [bp + ivt_segment]
+ 0836  8B 56 04				mov	dx, [bp + ivt_offset]
+ 0839  51				push	cx			; push segment for copying
+ 083A  52				push	dx			; push offset for copying
+
+ 083B  8B F4				mov	si, sp
+ 083D  8C D2				mov	dx, ss
+ 083F  8E DA				mov	ds, dx			; set ds to ss for movsw
+
+ 0841  BA 0000				mov	dx, 0
+ 0844  8E C2				mov	es, dx			; set es to IVT location
+
+ 0846  8B 7E 08				mov	di, [bp + ivt_number]; set di to correct location
+ 0849  C1 E7 02				shl	di, 2			; mul. by 4 b/c of IVT width
+
+ 084C  B9 0002				mov	cx, 2
+ 084F  FC				cld
+ 0850  FA				cli				; prevent interrupts
+
+ 0851  F3/ A5				rep	movsw
+
+ 0853  FB				sti				; allow for interrupts
+
+ 0854  5A				pop	dx			; restore stack (partially)
+ 0855  59				pop	cx
+
+ 0856  9D				popf
+ 0857  07				pop	es
+ 0858  1F				pop	ds
+ 0859  5E				pop	si
+ 085A  5F				pop	di
+ 085B  5A				pop	dx
+ 085C  59				pop	cx
+ 085D  5D				pop	bp
+ 085E  C3				ret
+ 085F				SetInterruptVector ENDP
+
+				; --------------------
+				;|                    |
+				;|   Save Keyboard    |
+				;|      Handler	      |
+				;|                    |
+				; --------------------
+
+ 085F				SaveKeyboardHandler PROC
+				; Fetches the keyboard handler and stores it in memory.
+ 085F  51				push	cx
+ 0860  52				push	dx
+ 0861  9C				pushf
+
+ 0862  B9 03E9 R			mov	cx, OFFSET OldKeyboardHandler
+ 0865  BA 0009				mov	dx, KEYHANDLER
+ 0868  52				push	dx			; Push IVT number
+ 0869  51				push	cx			; Push data offset
+ 086A  E8 FF8F				call	GetInterruptVector
+ 086D  83 C4 04				add	sp, 4
+
+ 0870  9D				popf
+ 0871  5A				pop	dx
+ 0872  59				pop	cx
+ 0873  C3				ret
+ 0874				SaveKeyboardHandler ENDP
+
+				; --------------------
+				;|                    |
+				;|     Save Timer     |
+				;|       Handler      |
+				;|                    |
+				; --------------------
+
+ 0874				SaveTimerHandler PROC
+				; Fetches the timer handler and stores it in memory.
+ 0874  51				push	cx
+ 0875  52				push	dx
+ 0876  9C				pushf
+
+ 0877  B9 03ED R			mov	cx, OFFSET OldTimerHandler
+ 087A  BA 0008				mov	dx, TIMERHANDLER
+ 087D  52				push	dx			; Push IVT number
+ 087E  51				push	cx			; Push data offset
+ 087F  E8 FF7A				call	GetInterruptVector
+ 0882  83 C4 04				add	sp, 4
+
+ 0885  9D				popf
+ 0886  5A				pop	dx
+ 0887  59				pop	cx
+ 0888  C3				ret
+ 0889				SaveTimerHandler ENDP
+
+				; --------------------
+				;|                    |
+				;|  Install Keyboard  |
+				;|      Handler       |
+				;|                    |
+				; --------------------
+
+ 0889				InstallKeyboardHandler PROC
+				; Uses SetInterruptVector to install my keyboard handler.
+ 0889  50				push	ax
+ 088A  53				push	bx
+ 088B  51				push	cx
+ 088C  9C				pushf
+
+ 088D  B8 0009				mov	ax, KEYHANDLER			; Load the ivt_number.
+ 0890  8C CB				mov	bx, cs				; Load the ivt_segment (.code).
+ 0892  B9 0733 R			mov	cx, OFFSET MyKeyboardHandler 	; Load the ivt_offset.
+ 0895  50				push	ax
+ 0896  53				push	bx
+ 0897  51				push	cx
+
+ 0898  E8 FF8E				call	SetInterruptVector
+ 089B  83 C4 06				add	sp, 6
+
+ 089E  9D				popf
+ 089F  59				pop	cx
+ 08A0  5B				pop	bx
+ 08A1  58				pop	ax
+ 08A2  C3				ret
+ 08A3				InstallKeyboardHandler ENDP
+
+				; --------------------
+				;|                    |
+				;|  Install Timer     |
+				;|      Handler       |
+				;|                    |
+				; --------------------
+
+ 08A3				InstallTimerHandler PROC
+				; Uses SetInterruptVector to install my timer handler.
+ 08A3  50				push	ax
+ 08A4  53				push	bx
+ 08A5  51				push	cx
+ 08A6  9C				pushf
+
+ 08A7  B8 0008				mov	ax, TIMERHANDLER			; Load the ivt_number.
+ 08AA  8C CB				mov	bx, cs					; Load the ivt_segment (.code).
+ 08AC  B9 077E R			mov	cx, OFFSET MyTimerHandler	 	; Load the ivt_offset.
+ 08AF  50				push	ax
+ 08B0  53				push	bx
+ 08B1  51				push	cx
+
+ 08B2  E8 FF74				call	setInterruptVector
+ 08B5  83 C4 06				add	sp, 6
+
+ 08B8  9D				popf
+ 08B9  59				pop	cx
+ 08BA  5B				pop	bx
+ 08BB  58				pop	ax
+ 08BC  C3				ret
+ 08BD				InstallTimerHandler ENDP
+
+				; --------------------
+				;|                    |
+				;|  Restore Keyboard  |
+				;|      Handler       |
+				;|                    |
+				; --------------------
+
+ 08BD				RestoreKeyboardHandler PROC
+				; Retrieves the old keyboard vector and sets it in the IVT.
+				; Takes segment in es.
+
+ 08BD  52				push	dx
+ 08BE  06				push	es
+ 08BF  9C				pushf
+
+ 08C0  BA 0009				mov	dx, KEYHANDLER
+ 08C3  52				push	dx
+ 08C4  26: FF 36 03EB R			push	ES:OldKeyboardSegment
+ 08C9  26: FF 36 03E9 R			push	ES:OldKeyboardOffset
+ 08CE  E8 FF58				call	SetInterruptVector
+ 08D1  83 C4 06				add	sp, 6
+
+ 08D4  9D				popf
+ 08D5  07				pop	es
+ 08D6  5A				pop	dx
+ 08D7  C3				ret
+ 08D8				RestoreKeyboardHandler ENDP
+
+				; --------------------
+				;|                    |
+				;|    Restore Timer   |
+				;|       Handler      |
+				;|                    |
+				; --------------------
+
+ 08D8				RestoreTimerHandler PROC
+				; Retrieves the old timer vector and sets it in the IVT
+
+ 08D8  52				push	dx
+ 08D9  9C				pushf
+
+ 08DA  BA 0008				mov	dx, TIMERHANDLER
+ 08DD  52				push	dx
+ 08DE  26: FF 36 03EF R			push	ES:OldTimerSegment
+ 08E3  26: FF 36 03ED R			push	ES:OldTimerOffset
+ 08E8  E8 FF3E				call	SetInterruptVector
+ 08EB  83 C4 06				add	sp, 6
+ 08EE  9D				popf
+ 08EF  5A				pop	dx
+ 08F0  C3				ret
+ 08F1				RestoreTimerHandler ENDP
+
+				; --------------------
+				;|                    |
+				;|       Wait On      |
+				;|    Exit Sequence   |
+				;|                    |
+				; --------------------
+ 08F1 57 61 69 74 69 6E		WaitingMessage BYTE "Waiting on exit sequence...", 0
+       67 20 6F 6E 20 65
+       78 69 74 20 73 65
+       71 75 65 6E 63 65
+       2E 2E 2E 00
+
+ 090D				WaitOnExitSequence PROC
+				; Waits for the CheckExitSequencePressed byte to be set to 1
+
+ 090D  50				push	ax
+ 090E  52				push	dx
+ 090F  9C				pushf	
+
+				;	mov	dx, OFFSET WaitingMessage
+				;	call	WriteString
+				;	call	NewLine
+
+ 0910				check:
+ 0910  80 3E 0401 R 01			cmp	ExitSequencePressed, 1
+ 0915  75 F9				jnz	check
+
+ 0917  9D				popf
+ 0918  5A				pop	dx
+ 0919  58				pop	ax
+ 091A  C3				ret
+ 091B				WaitOnExitSequence ENDP
+
+				; -------------------
+				;|                   |
+				;|  Already Loaded   |
+				;|     (et. all)     |
+				;|                   |
+				; -------------------
+
+ 091B 41 6C 72 65 61 64		AlreadyLoadedMessage BYTE "Already loaded! Terminating.", 0
+       79 20 6C 6F 61 64
+       65 64 21 20 54 65
+       72 6D 69 6E 61 74
+       69 6E 67 2E 00
+ 0938 49 6E 73 74 61 6C		InstallMessage BYTE "Installing!", 0
+       6C 69 6E 67 21 00
+ 0944 55 6E 69 6E 73 74		UninstallMsg BYTE "Uninstalling!", 0
+       61 6C 6C 69 6E 67
+       21 00
+ 0952 43 61 6E 6E 6F 74		CannotUninstallMessage BYTE "Cannot uninstall - not loaded.", 0
+       20 75 6E 69 6E 73
+       74 61 6C 6C 20 2D
+       20 6E 6F 74 20 6C
+       6F 61 64 65 64 2E
+       00
+
+ 0971				AlreadyLoaded PROC
+
+ 0971  50				push	ax
+ 0972  53				push	bx
+ 0973  51				push	cx
+ 0974  52				push	dx
+ 0975  06				push	es
+ 0976  56				push	si	
+ 0977  9C				pushf
+
+ 0978  E8 00EE				call	ClearCmdLineBuffer
+ 097B  BE 0402 R			mov	si, OFFSET AlreadyLoadedArray
+ 097E  E8 FEDE				call	SaveKeyboardHandler
+ 0981  8E 06 03EB R			mov	es, OldKeyboardSegment
+ 0985  B9 0008				mov	cx, 8
+
+				;Scan the arrays to see if we are loaded already
+ 0988				check_loaded:
+ 0988  8A 04				mov	al, [si]
+ 098A  26: 8A 1C			mov	bl, ES:[si]
+ 098D  38 D8				cmp	al, bl
+ 098F  75 3C				jnz	not_loaded
+ 0991  49				dec	cx
+ 0992  46				inc	si
+ 0993				cond:
+ 0993  83 F9 00				cmp	cx, 0
+ 0996  77 F0				ja	check_loaded
+
+				;If we ARE loaded, check to see if we want to uninstall.
+ 0998				loaded:
+ 0998  E8 010C				call	GetCmdLine
+ 099B  E8 0181				call	CleanUpCmdLine
+ 099E  80 3E 0367 R 2D			cmp	CmdLine, "-"
+ 09A3  75 19				jnz	do_not_load
+ 09A5  80 3E 0368 R 75			cmp	CmdLine + 1, "u"
+ 09AA  75 12				jnz 	do_not_load
+
+ 09AC  E8 00BA				call	ClearCmdLineBuffer	
+ 09AF  BA 0944 R			mov	dx, OFFSET UninstallMsg
+ 09B2  E8 FA9E				call	WriteString
+ 09B5  E8 01A6				call	ExitTSR
+ 09B8  B8 4C00				mov	ax, DOS_EXIT
+ 09BB  CD 21				int	DOS
+ 09BD  C3				ret
+
+ 09BE				do_not_load:
+ 09BE  E8 00A8				call	ClearCmdLineBuffer	
+ 09C1  BA 091B R			mov	dx, OFFSET AlreadyLoadedMessage
+ 09C4  E8 FA8C				call	WriteString
+ 09C7  B8 4C00				mov	ax, DOS_EXIT
+ 09CA  CD 21				int	DOS
+ 09CC  C3				ret
+
+				;If we AREN'T loaded, check to make sure we didn't want to uninstall.
+ 09CD				not_loaded:
+ 09CD  E8 00D7				call	GetCmdLine
+ 09D0  E8 014C				call	CleanUpCmdLine
+ 09D3  80 3E 0367 R 2D			cmp	CmdLine, "-"
+ 09D8  75 07				jnz	install
+ 09DA  80 3E 0368 R 75			cmp	CmdLine + 1, "u"
+ 09DF  74 11				jz	cannot_uninstall
+
+ 09E1				install:
+ 09E1  E8 0085				call	ClearCmdLineBuffer	
+ 09E4  BA 0938 R			mov	dx, OFFSET InstallMessage
+ 09E7  E8 FA69				call	WriteString
+
+ 09EA				done:
+ 09EA  9D				popf
+ 09EB  5E				pop	si
+ 09EC  07				pop	es
+ 09ED  5A				pop	dx
+ 09EE  59				pop	cx
+ 09EF  5B				pop	bx
+ 09F0  58				pop	ax	
+ 09F1  C3				ret
+
+ 09F2				cannot_uninstall:
+ 09F2  E8 0074				call	ClearCmdLineBuffer	
+ 09F5  BA 0952 R			mov	dx, OFFSET CannotUninstallMessage
+ 09F8  E8 FA58				call	WriteString
+ 09FB  B8 4C00				mov	ax, DOS_EXIT
+ 09FE  CD 21				int	DOS
+ 0A00  C3				ret
+ 0A01				AlreadyLoaded ENDP
+
+				; -----------------
+				;|                 |
+				;|      TSR        |
+				;|                 |
+				; -----------------
+ 0A01				TerminateStayResident PROC
+ 0A01  50				push	ax
+ 0A02  52				push	dx
+ 0A03  9C				pushf
+
+ 0A04  B8 3100				mov	ax, TSR
+ 0A07  BA 0BBF R			mov	dx, OFFSET EndTSR	; Calculate the # of paragraphs	
+ 0A0A  C1 EA 02				shr	dx, 2			; Divide by 4
+ 0A0D  42				inc	dx			; Add one
+ 0A0E  CD 21				int	DOS
+
+ 0A10  9D				popf	
+ 0A11  5A				pop	dx
+ 0A12  58				pop	ax
+ 0A13  C3				ret
+ 0A14				TerminateStayResident ENDP
+
+				; -----------------
+				;|                 |
+				;|     CmdLine     |
+				;|      Stuff      |
+				;|                 |
+				; -----------------
+
+ 0A14				PrintCmdLine PROC
+				; Prints out the command line.
+
+ 0A14  50				push	ax
+ 0A15  53				push	bx
+ 0A16  51				push	cx
+ 0A17  52				push	dx
+ 0A18  06				push	es
+ 0A19  56				push	si
+ 0A1A  9C				pushf
+
+					; Print a character to signify the start of input
+ 0A1B  B2 3C				mov	dl, "<"
+ 0A1D  E8 F9EC				call	WriteChar		
+
+ 0A20  B8 6200				mov	ax, PSPPOINTER	; Get the offset of the psp into bx.
+ 0A23  CD 21				int	DOS
+ 0A25  8E C3				mov	es, bx
+ 0A27  BE 0080				mov	si, CMDTAIL
+ 0A2A  26: 8A 0C			mov	cl, ES:[si]	; Move the length of the cmd tail into cx.
+ 0A2D  81 E1 00FF			and 	cx, 00FFh
+ 0A31  46				inc	si
+ 0A32  EB 08				jmp	cond
+
+ 0A34				top:
+ 0A34  26: 8A 14			mov	dl, ES:[si]
+ 0A37  E8 F9D2				call	WriteChar		
+ 0A3A  46				inc	si
+ 0A3B  49				dec	cx
+ 0A3C				cond:
+ 0A3C  83 F9 00				cmp	cx, 0
+ 0A3F  77 F3				ja	top
+
+					; Print a character to signify the end of input
+ 0A41  B2 3E				mov	dl, ">"
+ 0A43  E8 F9C6				call	WriteChar		
+ 0A46  E8 FA36				call	NewLine
+
+ 0A49  9D				popf
+ 0A4A  5E				pop	si
+ 0A4B  07				pop	es
+ 0A4C  5A				pop	dx
+ 0A4D  59				pop	cx
+ 0A4E  5B				pop	bx
+ 0A4F  58				pop	ax
+ 0A50  C3				ret
+ 0A51				PrintCmdLine ENDP
+
+ 0A51				PrintCmdLineBuffer PROC
+				; Prints out the memory location of CmdLine
+					
+ 0A51  52				push	dx
+ 0A52  9C				pushf
+					
+ 0A53  B2 7B				mov	dl, "{"
+ 0A55  E8 F9B4				call	WriteChar
+ 0A58  BA 0367 R			mov	dx, OFFSET CmdLine
+ 0A5B  E8 F9F5				call	WriteString
+ 0A5E  B2 7D				mov	dl, "}"
+ 0A60  E8 F9A9				call	WriteChar
+ 0A63  E8 FA19				call	NewLine
+
+ 0A66  9D				popf
+ 0A67  5A				pop	dx
+ 0A68  C3				ret
+ 0A69				PrintCmdLineBuffer ENDP
+
+ 0A69				ClearCmdLineBuffer PROC
+				; Clears the command line buffer in memory
+					
+ 0A69  50				push	ax
+ 0A6A  51				push	cx
+ 0A6B  57				push	di
+ 0A6C  9C				pushf
+
+ 0A6D  B9 0082				mov	cx, 130
+ 0A70  BF 0367 R			mov	di, OFFSET CmdLine
+ 0A73				top:
+ 0A73  B0 00				mov	al, 0
+ 0A75  88 05				mov	[di], al
+ 0A77  49				dec	cx
+ 0A78  47				inc	di
+ 0A79				cond:
+ 0A79  83 F9 00				cmp	cx, 0
+ 0A7C  77 F5				ja	top
+
+ 0A7E				done:
+ 0A7E  9D				popf
+ 0A7F  5F				pop	di
+ 0A80  59				pop	cx
+ 0A81  58				pop	ax
+ 0A82  C3				ret
+ 0A83				ClearCmdLineBuffer ENDP
+
+ 0A83				ClearPSPCmdLineBuffer PROC
+				; Clears the command line buffer in memory
+					
+ 0A83  50				push	ax
+ 0A84  51				push	cx
+ 0A85  57				push	di
+ 0A86  9C				pushf
+
+ 0A87  B9 0080				mov	cx, 128
+ 0A8A  BF 0367 R			mov	di, OFFSET CmdLine
+ 0A8D				top:
+ 0A8D  B8 6200				mov	ax, PSPPOINTER	; Get the offset of the psp into bx.
+ 0A90  CD 21				int	DOS
+ 0A92  8E C3				mov	es, bx
+ 0A94  BF 0080				mov	di, CMDTAIL
+ 0A97  B0 00				mov	al, 0
+ 0A99  88 05				mov	[di], al
+ 0A9B  49				dec	cx
+ 0A9C  47				inc	di
+ 0A9D				cond:
+ 0A9D  83 F9 00				cmp	cx, 0
+ 0AA0  77 EB				ja	top
+
+ 0AA2				done:
+ 0AA2  9D				popf
+ 0AA3  5F				pop	di
+ 0AA4  59				pop	cx
+ 0AA5  58				pop	ax
+ 0AA6  C3				ret
+ 0AA7				ClearPSPCmdLineBuffer ENDP
+
+ 0AA7				GetCmdLine PROC
+				; Reads the command line starting from the space after the program name
+				; and places that string in fileName. Doesn't work for lengths > 100.
+
+ 0AA7  50				push	ax
+ 0AA8  53				push	bx
+ 0AA9  51				push	cx
+ 0AAA  52				push	dx
+ 0AAB  57				push	di
+ 0AAC  56				push	si
+ 0AAD  06				push	es
+ 0AAE  9C				pushf
+					
+					; CITE: www.fysnet.net/cmndline.htm
+					; DESC: Hints/guidelines for reading from the command line.
+ 0AAF  B8 6200				mov	ax, PSPPOINTER	; Get the offset of the psp into bx.
+ 0AB2  CD 21				int	DOS
+ 0AB4  8E C3				mov	es, bx
+ 0AB6  BE 0080				mov	si, CMDTAIL
+ 0AB9  26: 8A 04			mov	al, ES:[si]
+ 0ABC  3C 7F				cmp	al, 127
+ 0ABE  7F 22				jg	tooLargeError
+ 0AC0  BF 0367 R			mov	di, OFFSET CmdLine
+ 0AC3  8A C8				mov	cl, al		; Move into cx the number of bytes to read.
+ 0AC5  81 E1 00FF			and	cx, 00FFh
+ 0AC9  46				inc	si		; Move to the actual command tail at 81h.
+ 0ACA  EB 08				jmp	cond
+
+ 0ACC				top:
+ 0ACC  26: 8A 04			mov	al, ES:[si]
+ 0ACF  88 05				mov	[di], al
+ 0AD1  46				inc	si
+ 0AD2  47				inc	di
+ 0AD3  49				dec	cx
+ 0AD4				cond:
+ 0AD4  83 F9 00				cmp	cx, 0
+ 0AD7  77 F3				ja	top
+
+ 0AD9  9D				popf	
+ 0ADA  07				pop	es
+ 0ADB  5E				pop	si
+ 0ADC  5F				pop	di
+ 0ADD  5A				pop	dx
+ 0ADE  59				pop	cx
+ 0ADF  5B				pop	bx
+ 0AE0  58				pop	ax
+ 0AE1  C3				ret
+
+ 0AE2				tooLargeError:
+ 0000				.data
+ 0000 50 6C 65 61 73 65		tooLargeMsg BYTE "Please enter less than 100 characters.", 0
+       20 65 6E 74 65 72
+       20 6C 65 73 73 20
+       74 68 61 6E 20 31
+       30 30 20 63 68 61
+       72 61 63 74 65 72
+       73 2E 00
+ 0AE2				.code
+ 0AE2  BA 0000 R			mov	dx, OFFSET tooLargeMsg
+ 0AE5  E8 F96B				call	WriteString
+ 0AE8  B8 4C00				mov	ax, DOS_EXIT
+ 0AEB  CD 21				int	DOS
+ 0AED  C3				ret
+ 0AEE				GetCmdLine ENDP
+
+ 0AEE				SetCmdLine PROC
+				;Sets the first eight bytes of the command line buffer to DANIELLE
+
+ 0AEE  50				push	ax
+ 0AEF  53				push	bx
+ 0AF0  51				push	cx
+ 0AF1  52				push	dx
+ 0AF2  57				push	di
+ 0AF3  56				push	si
+ 0AF4  06				push	es
+ 0AF5  9C				pushf
+					
+					; CITE: www.fysnet.net/cmndline.htm
+					; DESC: Hints/guidelines for reading from the command line.
+ 0AF6  B8 6200				mov	ax, PSPPOINTER	; Get the offset of the psp into bx.
+ 0AF9  CD 21				int	DOS
+ 0AFB  8E C3				mov	es, bx
+ 0AFD  BE 0402 R			mov	si, OFFSET AlreadyLoadedArray
+ 0B00  BF 0080				mov	di, CMDTAIL
+ 0B03  47				inc	di
+ 0B04  B9 0008				mov	cx, 8		; Move into cx the number of bytes to read.
+ 0B07  EB 08				jmp	cond
+
+ 0B09				top:
+ 0B09  8A 04				mov	al, [si]
+ 0B0B  26: 88 05			mov	ES:[di], al
+ 0B0E  46				inc	si
+ 0B0F  47				inc	di
+ 0B10  49				dec	cx
+ 0B11				cond:
+ 0B11  83 F9 00				cmp	cx, 0
+ 0B14  77 F3				ja	top
+
+ 0B16  9D				popf	
+ 0B17  07				pop	es
+ 0B18  5E				pop	si
+ 0B19  5F				pop	di
+ 0B1A  5A				pop	dx
+ 0B1B  59				pop	cx
+ 0B1C  5B				pop	bx
+ 0B1D  58				pop	ax
+ 0B1E  C3				ret
+
+ 0B1F				SetCmdLine ENDP
+
+ 0B1F				CleanUpCmdLine PROC
+				; Takes the string in CmdLine and cleans it up to only include printable characters.
+
+ 0B1F  50				push	ax
+ 0B20  53				push	bx
+ 0B21  51				push	cx
+ 0B22  52				push	dx
+ 0B23  57				push	di
+ 0B24  56				push	si
+ 0B25  9C				pushf
+
+ 0B26  BE 0367 R			mov	si, OFFSET CmdLine	; We want to start at the same point.
+ 0B29  BF 0367 R			mov	di, OFFSET CmdLine
+ 0B2C  B9 007F				mov	cx, 127			; This is the max length we can read.
+ 0B2F  BB 0000				mov	bx, 0000h		; We will use this as a flag for when
+									; to stop.
+ 0B32				top:
+ 0B32  8A 04				mov	al, [si]
+ 0B34  46				inc	si			
+ 0B35  49				dec	cx
+ 0B36  3C 21				cmp	al, 21h			; 21 is the lowest we will print.
+ 0B38  7C 0C				jl	omit
+ 0B3A  3C 7A				cmp	al, 7Ah
+ 0B3C  7F 08				jg	omit
+
+ 0B3E				use:
+ 0B3E  BB FFFF				mov	bx, -1			; Set out flag bc we started copying.
+ 0B41  88 05				mov	[di], al		; Copy the value we want 
+ 0B43  47				inc	di
+ 0B44  EB 05				jmp	cond
+
+ 0B46				omit:	
+ 0B46  83 FB FF				cmp	bx, -1
+ 0B49  74 07				je	done
+
+ 0B4B				cond:
+ 0B4B  83 F9 00				cmp	cx, 0
+ 0B4E  75 E2				jne	top
+ 0B50  EB 04				jmp	bottom
+
+ 0B52				done:
+ 0B52  B0 00				mov	al, 00h
+ 0B54  88 05				mov	[di], al
+					
+ 0B56				bottom:
+ 0B56  9D				popf	
+ 0B57  5E				pop	si
+ 0B58  5F				pop	di
+ 0B59  5A				pop	dx
+ 0B5A  59				pop	cx
+ 0B5B  5B				pop	bx
+ 0B5C  58				pop	ax
+ 0B5D  C3				ret
+ 0B5E				CleanUpCmdLine ENDP
+
+				; -----------------
+				;|                 |
+				;|    Exit TSR     |
+				;|                 |
+				; -----------------
+ 0B5E				ExitTSR PROC
+				;CITE: Nathaniel
+				;DESC: General idea of this routine
+ 0B5E  E8 FB28				call	RestoreScreenData
+ 0B61  E8 FCFB				call	SaveKeyboardHandler
+ 0B64  8E 06 03EB R			mov	es, OldKeyboardSegment
+ 0B68  E8 FD52				call	RestoreKeyboardHandler
+ 0B6B  E8 FD6A				call	RestoreTimerHandler
+ 0B6E  B8 4900				mov	ax, EXIT_TSR
+ 0B71  CD 21				int	DOS
+ 0B73  C3				ret
+ 0B74				ExitTSR ENDP
+
+ 0B74 53 65 67 6D 65 6E		SetupMessage BYTE "Segments setup. Installing handlers...", 0
+       74 73 20 73 65 74
+       75 70 2E 20 49 6E
+       73 74 61 6C 6C 69
+       6E 67 20 68 61 6E
+       64 6C 65 72 73 2E
+       2E 2E 00
+ 0B9B 48 61 6E 64 6C 65		HandlerMessage BYTE "Handlers installed; setup complete!", 0
+       72 73 20 69 6E 73
+       74 61 6C 6C 65 64
+       3B 20 73 65 74 75
+       70 20 63 6F 6D 70
+       6C 65 74 65 21 00
+
+ 0BBF				EndTSR	LABEL	BYTE
+				;-----------------------------------------------------------------------------
+				;/////////////////////////////////////////////////////////////////////////////
+				;-----------------------------------------------------------------------------
+
+ 0BBF				setup:
+					; DS = SS = CS
+ 0BBF  8C C8				mov	ax, cs
+ 0BC1  8E D8				mov	ds, ax
+ 0BC3  8E D0				mov	ss, ax
+ 0BC5  BC 01D7 R			mov	sp, OFFSET MySetupSP
+
+					;mov	dx, OFFSET SetupMessage
+					;call	WriteString
+					;call	NewLine
+					
+				; --------------------
+				;|                    |
+				;|    Pseudo-Main     |
+				;|                    |
+				; --------------------
+ 0BC8				main:
+ 0BC8  E8 FDA6				call	AlreadyLoaded
+ 0BCB  C6 06 040B R 01			mov	AlreadyLoadedFlag, 1
+
+ 0BD0  E8 FC8C				call	SaveKeyboardHandler
+ 0BD3  E8 FC9E				call	SaveTimerHandler
+ 0BD6  E8 FCB0				call	InstallKeyboardHandler
+ 0BD9  E8 FCC7				call	InstallTimerHandler
+					
+ 0BDC  E8 FE22				call	TerminateStayResident	
+
+ 0BDF  C3				ret
+ 0BE0				EndOfFile LABEL BYTE
+				END EntryPoint
+Microsoft (R) Macro Assembler Version 6.11		    11/02/18 08:59:48
+Keyping Time						     Symbols 2 - 1
+
+
+
+
+Segments and Groups:
+
+                N a m e                 Size     Length   Align   Combine Class
+
+DGROUP . . . . . . . . . . . . .	GROUP
+_TEXT  . . . . . . . . . . . . .	16 Bit	 0BE0	  Word	  Public  'CODE'	
+_DATA  . . . . . . . . . . . . .	16 Bit	 0027	  Word	  Public  'DATA'	
+
+
+Procedures,  parameters and locals:
+
+                N a m e                 Type     Value    Attr
+
+AdvanceCursor  . . . . . . . . .	P Near	 043C	  _TEXT	Length= 0017 Public
+AlreadyLoaded  . . . . . . . . .	P Near	 0971	  _TEXT	Length= 0090 Public
+  check_loaded . . . . . . . . .	L Near	 0988	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 0993	  _TEXT	
+  loaded . . . . . . . . . . . .	L Near	 0998	  _TEXT	
+  do_not_load  . . . . . . . . .	L Near	 09BE	  _TEXT	
+  not_loaded . . . . . . . . . .	L Near	 09CD	  _TEXT	
+  install  . . . . . . . . . . .	L Near	 09E1	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 09EA	  _TEXT	
+  cannot_uninstall . . . . . . .	L Near	 09F2	  _TEXT	
+CheckExitSequencePressed . . . .	P Near	 06A7	  _TEXT	Length= 0022 Public
+  pressed  . . . . . . . . . . .	L Near	 06BE	  _TEXT	
+  not_pressed  . . . . . . . . .	L Near	 06C2	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 06C4	  _TEXT	
+CleanUpCmdLine . . . . . . . . .	P Near	 0B1F	  _TEXT	Length= 003F Public
+  top  . . . . . . . . . . . . .	L Near	 0B32	  _TEXT	
+  use  . . . . . . . . . . . . .	L Near	 0B3E	  _TEXT	
+  omit . . . . . . . . . . . . .	L Near	 0B46	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 0B4B	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0B52	  _TEXT	
+  bottom . . . . . . . . . . . .	L Near	 0B56	  _TEXT	
+ClearCmdLineBuffer . . . . . . .	P Near	 0A69	  _TEXT	Length= 001A Public
+  top  . . . . . . . . . . . . .	L Near	 0A73	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 0A79	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0A7E	  _TEXT	
+ClearPSPCmdLineBuffer  . . . . .	P Near	 0A83	  _TEXT	Length= 0024 Public
+  top  . . . . . . . . . . . . .	L Near	 0A8D	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 0A9D	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0AA2	  _TEXT	
+ColorHexOut  . . . . . . . . . .	P Near	 0527	  _TEXT	Length= 003E Public
+  top  . . . . . . . . . . . . .	L Near	 0536	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 0557	  _TEXT	
+CursorToTopRight . . . . . . . .	P Near	 062B	  _TEXT	Length= 0015 Public
+DisplayTime  . . . . . . . . . .	P Near	 0640	  _TEXT	Length= 0019 Public
+ExitTSR  . . . . . . . . . . . .	P Near	 0B5E	  _TEXT	Length= 0016 Public
+GetCmdLine . . . . . . . . . . .	P Near	 0AA7	  _TEXT	Length= 0047 Public
+  top  . . . . . . . . . . . . .	L Near	 0ACC	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 0AD4	  _TEXT	
+  tooLargeError  . . . . . . . .	L Near	 0AE2	  _TEXT	
+GetCursorLoc . . . . . . . . . .	P Near	 060B	  _TEXT	Length= 000F Public
+GetInterruptVector . . . . . . .	P Near	 07FC	  _TEXT	Length= 002D Public
+GetSystemTime  . . . . . . . . .	P Near	 0591	  _TEXT	Length= 001D Public
+HexOut . . . . . . . . . . . . .	P Near	 04E9	  _TEXT	Length= 003E Public
+  top  . . . . . . . . . . . . .	L Near	 04F8	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 0519	  _TEXT	
+InstallKeyboardHandler . . . . .	P Near	 0889	  _TEXT	Length= 001A Public
+InstallTimerHandler  . . . . . .	P Near	 08A3	  _TEXT	Length= 001A Public
+MyKeyboardHandler  . . . . . . .	P Near	 0733	  _TEXT	Length= 004B Public
+  shifts . . . . . . . . . . . .	L Near	 074F	  _TEXT	
+  quit . . . . . . . . . . . . .	L Near	 075B	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0766	  _TEXT	
+MyTimerHandler . . . . . . . . .	P Near	 077E	  _TEXT	Length= 004D Public
+  not_pressed  . . . . . . . . .	L Near	 07A6	  _TEXT	
+  pressed  . . . . . . . . . . .	L Near	 07AE	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 07B1	  _TEXT	
+NewLine  . . . . . . . . . . . .	P Near	 047F	  _TEXT	Length= 0011 Public
+PrintCmdLineBuffer . . . . . . .	P Near	 0A51	  _TEXT	Length= 0018 Public
+PrintCmdLine . . . . . . . . . .	P Near	 0A14	  _TEXT	Length= 003D Public
+  top  . . . . . . . . . . . . .	L Near	 0A34	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 0A3C	  _TEXT	
+PrintSystemTime  . . . . . . . .	P Near	 05B1	  _TEXT	Length= 005A Public
+  special  . . . . . . . . . . .	L Near	 05DA	  _TEXT	
+  special2 . . . . . . . . . . .	L Near	 05E4	  _TEXT	
+  am . . . . . . . . . . . . . .	L Near	 05E7	  _TEXT	
+RestoreKeyboardHandler . . . . .	P Near	 08BD	  _TEXT	Length= 001B Public
+RestoreScreenData  . . . . . . .	P Near	 0689	  _TEXT	Length= 001E Public
+RestoreTimerHandler  . . . . . .	P Near	 08D8	  _TEXT	Length= 0019 Public
+SaveKeyboardHandler  . . . . . .	P Near	 085F	  _TEXT	Length= 0015 Public
+SaveTimerHandler . . . . . . . .	P Near	 0874	  _TEXT	Length= 0015 Public
+SetCmdLine . . . . . . . . . . .	P Near	 0AEE	  _TEXT	Length= 0031 Public
+  top  . . . . . . . . . . . . .	L Near	 0B09	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 0B11	  _TEXT	
+SetCursorLoc . . . . . . . . . .	P Near	 061A	  _TEXT	Length= 0011 Public
+SetInterruptVector . . . . . . .	P Near	 0829	  _TEXT	Length= 0036 Public
+ShiftsPressed  . . . . . . . . .	P Near	 06C9	  _TEXT	Length= 0022 Public
+  pressed  . . . . . . . . . . .	L Near	 06E0	  _TEXT	
+  not_pressed  . . . . . . . . .	L Near	 06E4	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 06E6	  _TEXT	
+ShowInterruptVector  . . . . . .	P Near	 07CB	  _TEXT	Length= 0031 Public
+StoreScreenData  . . . . . . . .	P Near	 0659	  _TEXT	Length= 0030 Public
+  top  . . . . . . . . . . . . .	L Near	 066C	  _TEXT	
+SwitchShouldPrintTime  . . . . .	P Near	 06EB	  _TEXT	Length= 001C Public
+  to_zero  . . . . . . . . . . .	L Near	 06F3	  _TEXT	
+  to_one . . . . . . . . . . . .	L Near	 06FD	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0705	  _TEXT	
+TerminateStayResident  . . . . .	P Near	 0A01	  _TEXT	Length= 0013 Public
+WaitOnExitSequence . . . . . . .	P Near	 090D	  _TEXT	Length= 000E Public
+  check  . . . . . . . . . . . .	L Near	 0910	  _TEXT	
+WriteChar  . . . . . . . . . . .	P Near	 040C	  _TEXT	Length= 0017 Public
+WriteColorChar . . . . . . . . .	P Near	 0423	  _TEXT	Length= 0019 Public
+WriteColorHexByte  . . . . . . .	P Near	 0570	  _TEXT	Length= 000B Public
+WriteColorHexDigit . . . . . . .	P Near	 04C4	  _TEXT	Length= 0025 Public
+WriteColorString . . . . . . . .	P Near	 0469	  _TEXT	Length= 0016 Public
+  top  . . . . . . . . . . . . .	L Near	 0470	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 0474	  _TEXT	
+WriteHexByte . . . . . . . . . .	P Near	 0565	  _TEXT	Length= 000B Public
+WriteHexDigit  . . . . . . . . .	P Near	 04A1	  _TEXT	Length= 0023 Public
+WriteHexLong . . . . . . . . . .	P Near	 0586	  _TEXT	Length= 000B Public
+WriteHexWord . . . . . . . . . .	P Near	 057B	  _TEXT	Length= 000B Public
+WriteString  . . . . . . . . . .	P Near	 0453	  _TEXT	Length= 0016 Public
+  top  . . . . . . . . . . . . .	L Near	 045A	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 045E	  _TEXT	
+
+
+Symbols:
+
+                N a m e                 Type     Value    Attr
+
+@CodeSize  . . . . . . . . . . .	Number	 0000h	 
+@DataSize  . . . . . . . . . . .	Number	 0000h	 
+@Interface . . . . . . . . . . .	Number	 0000h	 
+@Model . . . . . . . . . . . . .	Number	 0001h	 
+@code  . . . . . . . . . . . . .	Text   	 DGROUP
+@data  . . . . . . . . . . . . .	Text   	 DGROUP
+@fardata?  . . . . . . . . . . .	Text   	 FAR_BSS
+@fardata . . . . . . . . . . . .	Text   	 FAR_DATA
+@stack . . . . . . . . . . . . .	Text   	 DGROUP
+AlreadyLoadedArray . . . . . . .	Byte	 0402	  _TEXT	
+AlreadyLoadedMessage . . . . . .	Byte	 091B	  _TEXT	
+AlreadyLoadedflag  . . . . . . .	Byte	 040B	  _TEXT	
+BIOS_GETSCRCONTENTS  . . . . . .	Number	 0008h	 
+BIOS_READ_CURSOR . . . . . . . .	Number	 0003h	 
+BIOS_SETSCRCONTENTS  . . . . . .	Number	 000Ah	 
+BIOS_WRITE_CHAR  . . . . . . . .	Number	 000Ah	 
+BIOS_WRITE_COLOR_CHAR  . . . . .	Number	 0009h	 
+BIOS_WRITE_CURSOR  . . . . . . .	Number	 0002h	 
+BIOS . . . . . . . . . . . . . .	Number	 0010h	 
+CMDTAIL  . . . . . . . . . . . .	Number	 0080h	 
+COLOR  . . . . . . . . . . . . .	Number	 000Dh	 
+CannotUninstallMessage . . . . .	Byte	 0952	  _TEXT	
+CmdLine  . . . . . . . . . . . .	Byte	 0367	  _TEXT	
+ControlMessage . . . . . . . . .	Byte	 0707	  _TEXT	
+DOS_EXIT . . . . . . . . . . . .	Number	 4C00h	 
+DOS_GETTIME  . . . . . . . . . .	Number	 002Ch	 
+DOS  . . . . . . . . . . . . . .	Number	 0021h	 
+EXIT_TSR . . . . . . . . . . . .	Number	 4900h	 
+EndOfFile  . . . . . . . . . . .	Byte	 0BE0	  _TEXT	
+EndTSR . . . . . . . . . . . . .	Byte	 0BBF	  _TEXT	
+EntryPoint . . . . . . . . . . .	L Near	 0100	  _TEXT	
+ExitSequencePressed  . . . . . .	Byte	 0401	  _TEXT	
+GET_RETURN_CODE  . . . . . . . .	Number	 004Dh	 
+HandlerMessage . . . . . . . . .	Byte	 0B9B	  _TEXT	
+InstallMessage . . . . . . . . .	Byte	 0938	  _TEXT	
+KEYHANDLER . . . . . . . . . . .	Number	 0009h	 
+KEY_INFO_OFFSET  . . . . . . . .	Number	 0017h	 
+KEY_INFO_SEGMENT . . . . . . . .	Number	 0040h	 
+MyKeySP  . . . . . . . . . . . .	Word	 029F	  _TEXT	
+MyKeyStack . . . . . . . . . . .	Word	 01D7	  _TEXT	
+MySetupSP  . . . . . . . . . . .	Word	 01D7	  _TEXT	
+MySetupStack . . . . . . . . . .	Word	 010F	  _TEXT	
+MyTimerSP  . . . . . . . . . . .	Word	 0367	  _TEXT	
+MyTimerStack . . . . . . . . . .	Word	 029F	  _TEXT	
+OldKeyDS . . . . . . . . . . . .	Word	 0103	  _TEXT	
+OldKeySP . . . . . . . . . . . .	Word	 0107	  _TEXT	
+OldKeySS . . . . . . . . . . . .	Word	 0105	  _TEXT	
+OldKeyboardHandler . . . . . . .	DWord	 03E9	  _TEXT	
+OldKeyboardOffset  . . . . . . .	Word	 03E9	  _TEXT	
+OldKeyboardSegment . . . . . . .	Word	 03EB	  _TEXT	
+OldScreenData  . . . . . . . . .	Byte	 03F5	  _TEXT	
+OldTimerDS . . . . . . . . . . .	Word	 0109	  _TEXT	
+OldTimerHandler  . . . . . . . .	DWord	 03ED	  _TEXT	
+OldTimerOffset . . . . . . . . .	Word	 03ED	  _TEXT	
+OldTimerSP . . . . . . . . . . .	Word	 010D	  _TEXT	
+OldTimerSS . . . . . . . . . . .	Word	 010B	  _TEXT	
+OldTimerSegment  . . . . . . . .	Word	 03EF	  _TEXT	
+PSPPOINTER . . . . . . . . . . .	Number	 6200h	 
+SYSTEM_GETTIME . . . . . . . . .	Number	 0002h	 
+SYSTEM . . . . . . . . . . . . .	Number	 001Ah	 
+SetupMessage . . . . . . . . . .	Byte	 0B74	  _TEXT	
+ShouldPrintTime  . . . . . . . .	Byte	 0400	  _TEXT	
+SystemDLSavings  . . . . . . . .	Byte	 03F4	  _TEXT	
+SystemHourLabel  . . . . . . . .	Byte	 05AE	  _TEXT	
+SystemHours  . . . . . . . . . .	Byte	 03F1	  _TEXT	
+SystemMinutes  . . . . . . . . .	Byte	 03F2	  _TEXT	
+SystemSeconds  . . . . . . . . .	Byte	 03F3	  _TEXT	
+SystemTime . . . . . . . . . . .	Word	 03F1	  _TEXT	
+TIMERHANDLER . . . . . . . . . .	Number	 0008h	 
+TSR  . . . . . . . . . . . . . .	Number	 3100h	 
+UninstallMsg . . . . . . . . . .	Byte	 0944	  _TEXT	
+WaitingMessage . . . . . . . . .	Byte	 08F1	  _TEXT	
+data_offset  . . . . . . . . . .	Number	 0004h	 
+hexArray . . . . . . . . . . . .	Byte	 0490	  _TEXT	
+ivt_number . . . . . . . . . . .	Number	 0008h	 
+ivt_offset . . . . . . . . . . .	Number	 0004h	 
+ivt_segment  . . . . . . . . . .	Number	 0006h	 
+main . . . . . . . . . . . . . .	L Near	 0BC8	  _TEXT	
+setup  . . . . . . . . . . . . .	L Near	 0BBF	  _TEXT	
+tooLargeMsg  . . . . . . . . . .	Byte	 0000	  _DATA	
+
+	   0 Warnings
+	   0 Errors

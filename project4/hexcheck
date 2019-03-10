@@ -1,0 +1,9 @@
+#!/bin/bash
+
+input=$1
+dosfile=$2
+
+hexdump -C $input > unix.out
+dos2unix < $dosfile > my.out
+
+cmp unix.out my.out

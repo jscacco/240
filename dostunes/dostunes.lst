@@ -1,0 +1,2107 @@
+Microsoft (R) Macro Assembler Version 6.11		    11/12/18 02:54:19
+music.asm						     Page 1 - 1
+
+
+				; Name: Jack Scacco
+				; Assignment: Project 7
+				; Due Date: 11/12/18
+				; File: music.asm
+
+				INCLUDE CS240.inc
+			      C .NOLIST
+			      C .LIST
+			      C 
+				.386
+
+ = 0010				BIOS			= 10h
+ = 0021				DOS 			= 21h
+ = 4C00				DOS_EXIT		= 4C00h
+
+ = 0015				TIMER			= 15h
+ = 0086				TIMER_WAIT		= 86h
+ = 000F4240			ONE_SECOND		= 1000000
+ = 03938700			ONE_MINUTE		= 60000000
+
+ = 001234DC			FREQUENCY		= 1193180
+
+ = 00B6				READY_TIMER		= 0B6h
+ = 0042				TIMER_DATA_PORT		= 42h
+ = 0043				TIMER_CONTROL_PORT	= 43h
+ = 0061				SPEAKER_PORT 		= 61h
+
+ = 6200				PSPPOINTER	= 6200h
+ = 0080				CMDTAIL		= 80h
+ = 3D00				OPENF 		= 3D00h
+ = 3E00				CLOSEF 		= 3E00h
+ = 3F00				READF 		= 3F00h
+ = 000D				CARRIAGERET	= 0Dh
+ = 0002				PRINTCHR	= 02h
+ = 0001				READ_CHAR	= 01h
+
+ 0000				.data
+ 0000  007F [			FileName BYTE 127 dup(0)
+        00
+       ]
+ 007F 0000			FileHandle WORD ?
+
+ 0081 00			Muted 			BYTE 	0
+ 0082				WaitInterval 		LABEL 	DWORD
+ 0082 0000			WaitTop 		WORD 	0
+ 0084 0000			WaitBot 		WORD 	0
+
+ 0086 00 00			TimeSignature		BYTE	0, 0
+ 0088 0000			BPM 			WORD 	0
+ 008A 00000000			BeatLength		DWORD	0
+
+ 008E 00000000			WholeNoteLength		DWORD	0
+ 0092 00000000			HalfNoteLength		DWORD	0
+ 0096 00000000			QuarterNoteLength	DWORD	0
+ 009A 00000000			EighthNoteLength	DWORD	0
+ 009E 00000000			SixteenthNoteLength	DWORD	0
+ 00A2 00000000			ThirtysecondNoteLength	DWORD	0
+
+ 00A6 00			CurrentOctave		BYTE	0
+ 00A7 00			CurrentNote		BYTE	0
+ 00A8 00			CurrentAccidental	BYTE	0
+ 00A9 00			CurrentLength		BYTE	0
+
+ 00AA 00 00			KeySigNote		BYTE	0, 0
+ 00AC 00			KeySigAccidental	BYTE	0
+ 00AD 00			KeySigNumber		BYTE	0
+
+ 00AE				CurrentLine		BYTE 	0 dup(10)
+ 00AE				TrashBuffer		BYTE	0 dup(10)
+ 00AE 43 09 34 09 57		Note1			BYTE	"C	4	W"
+ 00B3 46 09 34 09 57		Note2			BYTE	"F	4	W"
+ 00B8 47 09 34 09 57		Note3			BYTE	"G	4	W"
+
+ 00BD 0000			CurrentPixelOffset	WORD	0
+				;-----------------------------------------------------------------------------
+				;\\\\\\\\\\\\\\\\\\ Notes -> Count \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+				;-----------------------------------------------------------------------------
+				;		A	A#	B	C	C#	D	D#	E	F	F#	G	G#
+ 00BF A97C A001 9708 8E89	Octave1 WORD	43388,	40961,	38664,	36489,	34445,	32512,	30681,	28961,	27335,	25804,	24356,	22986
+       868D 7F00 77D9
+       7121 6AC7 64CC
+       5F24 59CA
+ 00D7 54BE 4FFD 4B7F 4743	Octave2 WORD	21694,	20477,	19327,	18243,	17219,	16254,	15340,	14479,	13666,	12899,	12177,	11492
+       4343 3F7E 3BEC
+       388F 3562 3263
+       2F91 2CE4
+ 00EF 2A5F 27FE 25C0 23A1	Octave3 WORD	10847,	10238,	9664,	9121,	8609,	8126,	7670,	7240,	6833,	6450,	6088,	5746
+       21A1 1FBE 1DF6
+       1C48 1AB1 1932
+       17C8 1672
+ 0107 1530 13FF 12DF 11CA	Octave4 WORD	5424,	5119,	4831,	4554,	4305,	4064,	3835,	3620,	3417,	3225,	3044,	2873
+       10D1 0FE0 0EFB
+       0E24 0D59 0C99
+       0BE4 0B39
+ 011F 0A98 0A00 0970 08E8	Octave5 WORD	2712,	2560,	2416,	2280,	2152,	2032,	1918,	1810,	1708,	1612,	1522,	1437
+       0868 07F0 077E
+       0712 06AC 064C
+       05F2 059D
+ 0137 054C 0500 04B8 0474	Octave6 WORD	1356,	1280,	1208,	1140,	1076,	1016,	959,	905,	854,	806,	761,	718
+       0434 03F8 03BF
+       0389 0356 0326
+       02F9 02CE
+ 014F 02A6 0280 025C 023A	Octave7	WORD	678,	640,	604,	570,	538,	508,	479,	452,	427,	403,	380,	359
+       021A 01FC 01DF
+       01C4 01AB 0193
+       017C 0167
+ 0167 0153 0140 012E 011D	Octave8 WORD	339,	320,	302,	285
+
+				;-----------------------------------------------------------------------------
+				;\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+				;-----------------------------------------------------------------------------
+
+ 016F 0000			CurrentPixel WORD 0
+
+ 0171 000D 0014 0064		Pixels	WORD	13, 20, 100
+ 0177  000D 0014 0066			WORD	13, 20, 102
+ 017D  000F 0014 0068			WORD	15, 20, 104
+ 0183  000F 0014 006A			WORD	15, 20, 106
+ 0189  0003 0014 006C			WORD	3, 20,  108
+ 018F  0005 002C 006C			WORD	5, 44,  108
+ 0195  0003 0014 006E			WORD	3, 20,  110
+ 019B  0005 002C 006E			WORD	5, 44,  110
+ 01A1  0003 0014 0070			WORD	3, 20,  112
+ 01A7  0005 002C 0070			WORD	5, 44,  112
+ 01AD  0003 0014 0072			WORD	3, 20,  114
+ 01B3  0005 002C 0072			WORD	5, 44,  114
+ 01B9  0003 0014 0074			WORD	3, 20,  116
+ 01BF  0005 002C 0074			WORD	5, 44,  116
+ 01C5  0003 0014 0076			WORD	3, 20,  118
+ 01CB  0005 002C 0076			WORD	5, 44,  118
+ 01D1  0003 0014 0078			WORD	3, 20,  120
+ 01D7  0005 002C 0078			WORD	5, 44,  120
+ 01DD  0003 0014 007A			WORD	3, 20,  122
+ 01E3  0005 002C 007A			WORD	5, 44,  122
+ 01E9  0003 0014 007C			WORD	3, 20,  124
+ 01EF  0005 002C 007C			WORD	5, 44,  124
+ 01F5  0003 0014 007E			WORD	3, 20,  126
+ 01FB  0005 002C 007E			WORD	5, 44,  126
+ 0201  0003 0014 0080			WORD	3, 20,  128
+ 0207  0005 002C 0080			WORD	5, 44,  128
+ 020D  0003 0014 0082			WORD	3, 20,  130
+ 0213  0005 002C 0082			WORD	5, 44,  130
+ 0219  0003 0014 0084			WORD	3, 20,  132
+ 021F  0005 002C 0084			WORD	5, 44,  132
+ 0225  0003 0014 0086			WORD	3, 20,  134
+ 022B  0005 002C 0086			WORD	5, 44,  134
+ 0231  0003 0014 0088			WORD	3, 20,  136
+ 0237  0005 002C 0088			WORD	5, 44,  136
+ 023D  0003 0014 008A			WORD	3, 20,  138
+ 0243  0005 002C 008A			WORD	5, 44,  138
+ 0249  0003 0014 008C			WORD	3, 20,  140
+ 024F  0005 002C 008C			WORD	5, 44,  140
+ 0255  000F 0014 008E			WORD	15, 20, 142
+ 025B  000F 0014 0090			WORD	15, 20, 144
+ 0261  000D 0014 0092			WORD	13, 20, 146
+ 0267  000D 0014 0094			WORD	13, 20, 148
+
+ 026D  0009 003C 0084			WORD	9, 60, 132
+ 0273  0009 003C 0086			WORD	9, 60, 134
+ 0279  0002 003C 0088			WORD	2, 60, 136
+ 027F  0002 004A 0088			WORD	2, 74, 136
+ 0285  0002 003C 008A			WORD	2, 60, 138
+ 028B  0002 004A 008A			WORD	2, 74, 138
+ 0291  0002 003C 008C			WORD	2, 60, 140
+ 0297  0002 004A 008C			WORD	2, 74, 140
+ 029D  0002 003C 008E			WORD	2, 60, 142
+ 02A3  0002 004A 008E			WORD	2, 74, 142
+ 02A9  0002 003C 0090			WORD	2, 60, 144
+ 02AF  0002 004A 0090			WORD	2, 74, 144
+ 02B5  0009 003C 0092			WORD	9, 60, 146
+ 02BB  0009 003C 0094			WORD	9, 60, 148
+
+ 02C1  0007 0054 0084			WORD	7, 84, 132
+ 02C7  0007 0054 0086			WORD	7, 84, 134
+ 02CD  0002 0054 0088			WORD	2, 84, 136
+ 02D3  0007 0054 008A			WORD	7, 84, 138
+ 02D9  0007 0054 008C			WORD	7, 84, 140
+ 02DF  0002 005E 008E			WORD	2, 94, 142
+ 02E5  0002 005E 0090			WORD	2, 94, 144
+ 02EB  0007 0054 0092			WORD	7, 84, 146
+ 02F1  0007 0054 0094			WORD	7, 84, 148
+
+ 02F7  0002 006C 0072			WORD	2, 108, 114
+ 02FD  0002 006C 0074			WORD	2, 108, 116
+ 0303  0002 006C 0076			WORD	2, 108, 118
+ 0309  0002 006C 0078			WORD	2, 108, 120
+ 030F  0002 006C 007A			WORD	2, 108, 122
+ 0315  0002 006C 007C			WORD	2, 108, 124
+ 031B  0002 006C 007E			WORD	2, 108, 126
+ 0321  0002 006C 0080			WORD	2, 108, 128
+ 0327  0002 006C 0082			WORD	2, 108, 130
+ 032D  0006 0068 0084			WORD	6, 104, 132
+ 0333  0006 0068 0086			WORD	6, 104, 134
+ 0339  0002 006C 0088			WORD	2, 108, 136
+ 033F  0002 006C 008A			WORD	2, 108, 138
+ 0345  0002 006C 008C			WORD	2, 108, 140
+ 034B  0002 006C 008E			WORD	2, 108, 142
+ 0351  0002 006C 0090			WORD	2, 108, 144
+ 0357  0002 006C 0092			WORD	2, 108, 146
+ 035D  0002 006C 0094			WORD	2, 108, 148
+
+ 0363  0002 0078 0084			WORD	2, 120, 132
+ 0369  0002 0080 0084			WORD	2, 128, 132	
+ 036F  0002 0078 0086			WORD	2, 120, 134
+ 0375  0002 0080 0086			WORD	2, 128, 134
+ 037B  0002 0078 0088			WORD	2, 120, 136
+ 0381  0002 0080 0088			WORD	2, 128, 136
+ 0387  0002 0078 008A			WORD	2, 120, 138
+ 038D  0002 0080 008A			WORD	2, 128, 138
+ 0393  0002 0078 008C			WORD	2, 120, 140
+ 0399  0002 0080 008C			WORD	2, 128, 140
+ 039F  0002 0078 008E			WORD	2, 120, 142
+ 03A5  0002 0080 008E			WORD	2, 128, 142
+ 03AB  0002 0078 0090			WORD	2, 120, 144
+ 03B1  0002 0080 0090			WORD	2, 128, 144
+ 03B7  0007 0078 0092			WORD	7, 120, 146
+ 03BD  0007 0078 0094			WORD	7, 120, 148
+
+ 03C3  0002 008A 0084			WORD	2, 138, 132
+ 03C9  0006 008A 0086			WORD	6, 138, 134
+ 03CF  0006 008A 0088			WORD	6, 138, 136
+ 03D5  0002 008A 008A			WORD	2, 138, 138
+ 03DB  0002 0092 008A			WORD	2, 146, 138
+ 03E1  0002 008A 008C			WORD	2, 138, 140
+ 03E7  0002 0092 008C			WORD	2, 146, 140
+ 03ED  0002 008A 008E			WORD	2, 138, 142
+ 03F3  0002 0092 008E			WORD	2, 146, 142
+ 03F9  0002 008A 0090			WORD	2, 138, 144
+ 03FF  0002 0092 0090			WORD	2, 146, 144
+ 0405  0002 008A 0092			WORD	2, 138, 146
+ 040B  0002 0092 0092			WORD	2, 146, 146
+ 0411  0002 008A 0094			WORD	2, 138, 148
+ 0417  0002 0092 0094			WORD	2, 146, 148
+
+ 041D  0006 009E 0084			WORD	6, 158, 132
+ 0423  0003 009C 0086			WORD	3, 156, 134
+ 0429  0002 00A8 0086			WORD	2, 168, 134
+ 042F  0003 009C 0088			WORD	3, 156, 136
+ 0435  0001 00AA 0088			WORD	1, 170, 136
+ 043B  0008 009C 008A			WORD	8, 156, 138
+ 0441  0008 009C 008C			WORD	8, 156, 140
+ 0447  0003 009C 008E			WORD	3, 156, 142
+ 044D  0003 009C 0090			WORD	3, 156, 144
+ 0453  0007 009E 0092			WORD	7, 158, 146
+ 0459  0006 009E 0094			WORD	6, 158, 148
+
+ 045F  0007 00B0 0084			WORD	7, 176, 132
+ 0465  0007 00B0 0086			WORD	7, 176, 134
+ 046B  0002 00B0 0088			WORD	2, 176, 136
+ 0471  0007 00B0 008A			WORD	7, 176, 138
+ 0477  0007 00B0 008C			WORD	7, 176, 140
+ 047D  0002 00BA 008E			WORD	2, 186, 142
+ 0483  0002 00BA 0090			WORD	2, 186, 144
+ 0489  0007 00B0 0092			WORD	7, 176, 146
+ 048F  0007 00B0 0094			WORD	7, 176, 148
+ 0495				EndPixels	LABEL	WORD
+
+ 0495  0036 0014			WORD	54, 20
+ 0499  0037 0014			WORD	55, 20
+
+ 049D  0038 0014			WORD	56, 20
+ 04A1  0039 0014			WORD	57, 20
+ 04A5  003A 0014			WORD	58, 20
+ 04A9  003B 0014			WORD	59, 20
+ 04AD  003C 0014			WORD	60, 20
+ 04B1  003D 0014			WORD	61, 20
+ 04B5  003E 0014			WORD	62, 20
+ 04B9  00A4 0068			WORD 	164, 104
+ 04BD  00A5 0069			WORD	165, 105
+ 04C1  00A6 006A			WORD	166, 106
+ 04C5  00A7 006B			WORD	167, 107
+ 04C9  00A8 006C			WORD 	168, 108
+ 04CD  00A9 006D			WORD	169, 109
+ 04D1  00AA 006E			WORD	170, 110
+
+ 04D5  0000 0000			WORD	0, 0
+ 04D9  0000 0000			WORD 	0, 0
+ 04DD  0000 0000			WORD	0, 0
+ 04E1  0000 0000			WORD	0, 0
+ 04E5  0000 0000			WORD	0, 0
+ 04E9  0000 0000			WORD 	0, 0
+ 04ED  0000 0000			WORD	0, 0
+ 04F1  0000 0000			WORD	0, 0
+ 04F5  0000 0000			WORD	0, 0
+ 04F9  0000 0000			WORD 	0, 0
+ 0000				.code
+
+				; ---------------------
+				;|		       |
+				;|    File Reading     |
+				;|	Stuff	       |
+				;|		       |
+				; ---------------------
+
+ 0000				GetCmdTail PROC
+				; Reads the command line starting from the space after the program name
+				; and places that string in fileName. Doesn't work for lengths > 100.
+
+ 0000  50				push	ax
+ 0001  53				push	bx
+ 0002  51				push	cx
+ 0003  52				push	dx
+ 0004  57				push	di
+ 0005  56				push	si
+ 0006  06				push	es
+ 0007  9C				pushf
+
+					; CITE: www.fysnet.net/cmndline.htm
+					; DESC: Hints/guidelines for reading from the command line.
+ 0008  B8 6200				mov	ax, PSPPOINTER	; Get the offset of the psp into bx.
+ 000B  CD 21				int	DOS
+ 000D  8E C3				mov	es, bx
+ 000F  BE 0080				mov	si, CMDTAIL
+ 0012  26: 8A 04			mov	al, ES:[si]
+ 0015  3C 7F				cmp	al, 127
+ 0017  7F 21				jg	tooLargeError
+ 0019  BF 0000 R			mov	di, OFFSET fileName
+ 001C  25 00FF				and	ax, 00FFh
+ 001F  8B C8				mov	cx, ax		; Move into cs the number of bytes to read.
+ 0021  46				inc	si		; Move to the actual command tail at 81h.
+ 0022  EB 08				jmp	cond
+
+ 0024				top:
+ 0024  26: 8A 04			mov	al, ES:[si]
+ 0027  88 05				mov	[di], al
+ 0029  46				inc	si
+ 002A  47				inc	di
+ 002B  49				dec	cx
+ 002C				cond:
+ 002C  83 F9 00				cmp	cx, 0
+ 002F  75 F3				jne	top
+
+ 0031  9D				popf
+ 0032  07				pop	es
+ 0033  5E				pop	si
+ 0034  5F				pop	di
+ 0035  5A				pop	dx
+ 0036  59				pop	cx
+
+ 0037  5B				pop	bx
+ 0038  58				pop	ax
+ 0039  C3				ret
+
+ 003A				tooLargeError:
+ 04FD				.data
+ 04FD 50 6C 65 61 73 65		tooLargeMsg BYTE "Please enter less than 100 characters.", 0
+       20 65 6E 74 65 72
+       20 6C 65 73 73 20
+       74 68 61 6E 20 31
+       30 30 20 63 68 61
+       72 61 63 74 65 72
+       73 2E 00
+ 003A				.code
+ 003A  BA 04FD R			mov	dx, OFFSET tooLargeMsg
+ 003D  E8 0000 E			call	WriteString
+ 0040  B8 4C00				mov	ax, DOS_EXIT
+ 0043  CD 21				int	DOS
+ 0045				GetCmdTail ENDP
+
+ 0045				CleanUpFileName PROC
+				; Takes the string in fileName and cleans it up to only include printable characters.
+
+ 0045  50				push	ax
+ 0046  53				push	bx
+ 0047  51				push	cx
+ 0048  52				push	dx
+ 0049  57				push	di
+ 004A  56				push	si
+ 004B  9C				pushf
+
+ 004C  BE 0000 R			mov	si, OFFSET fileName	; We want to start at the same point.
+ 004F  BF 0000 R			mov	di, OFFSET fileName
+ 0052  B9 007F				mov	cx, 127			; This is the max length we can read.
+ 0055  BB 0000				mov	bx, 0000h		; We will use this as a flag for when
+									; to stop.
+ 0058				top:
+ 0058  8A 04				mov	al, [si]
+ 005A  46				inc	si
+ 005B  49				dec	cx
+ 005C  3C 21				cmp	al, 21h			; 21 is the lowest we will print.
+ 005E  7C 0C				jl	omit
+ 0060  3C 7A				cmp	al, 7Ah
+ 0062  7F 08				jg	omit
+
+ 0064				use:
+ 0064  BB FFFF				mov	bx, -1			; Set out flag bc we started copying.
+ 0067  88 05				mov	[di], al		; Copy the value we want
+ 0069  47				inc	di
+ 006A  EB 05				jmp	cond
+
+ 006C				omit:
+ 006C  83 FB FF				cmp	bx, -1
+ 006F  74 07				je	done
+
+ 0071				cond:
+ 0071  83 F9 00				cmp	cx, 0
+ 0074  75 E2				jne	top
+ 0076  EB 04				jmp	bottom
+
+ 0078				done:
+ 0078  B0 00				mov	al, 00h
+ 007A  88 05				mov	[di], al
+
+ 007C				bottom:
+ 007C  9D				popf
+ 007D  5E				pop	si
+ 007E  5F				pop	di
+ 007F  5A				pop	dx
+ 0080  59				pop	cx
+ 0081  5B				pop	bx
+ 0082  58				pop	ax
+ 0083  C3				ret
+ 0084				CleanUpFileName ENDP
+
+ 0084				OpenFile PROC
+				; Opens the file whose name is in fileName and places its handle in fileHandle.
+				; If the file name is not found, print an error message and end the program.
+
+ 0084  50				push	ax
+ 0085  52				push	dx
+ 0086  9C				pushf
+
+ 0087  B8 3D00				mov	ax, OPENF
+ 008A  BA 0000 R			mov	dx, OFFSET fileName
+ 008D  CD 21				int	DOS
+
+ 008F  83 F8 02				cmp	ax, 02h		; 02h is the error value for no file.
+ 0092  74 07				je	filenotfound
+
+ 0094  A3 007F R			mov	fileHandle, ax
+
+ 0097  9D				popf
+ 0098  5A				pop	dx
+ 0099  58				pop	ax
+ 009A  C3				ret
+
+ 009B				filenotfound:
+ 0524				.data
+ 0524 46 69 6C 65 20 6E		noFileMsg BYTE "File not found!", 0
+       6F 74 20 66 6F 75
+       6E 64 21 00
+ 009B				.code
+ 009B  BA 0524 R			mov	dx, OFFSET noFileMsg
+ 009E  E8 0000 E			call	WriteString	; Print Message
+ 00A1  9D				popf			; Restore state
+ 00A2  5A				pop	dx
+ 00A3  B8 4C00				mov	ax, DOS_EXIT	; Exit DOS
+ 00A6  CD 21				int	DOS
+ 00A8				OpenFile ENDP
+
+ 00A8				CloseFile PROC
+				; Closes the file whose handle is in fileHandle
+
+ 00A8  50				push	ax
+ 00A9  53				push	bx
+ 00AA  9C				pushf
+
+ 00AB  B8 3E00				mov	ax, CLOSEF
+ 00AE  8B 1E 007F R			mov	bx, fileHandle
+ 00B2  CD 21				int	DOS
+
+ 00B4  9D				popf
+ 00B5  5B				pop	bx
+ 00B6  58				pop	ax
+ 00B7  C3				ret
+ 00B8				CloseFile ENDP
+
+ 00B8				ReadNextLine PROC
+				; Reads the next line from the file and places it in CurrentLine
+				; Does not preserve ax (bc it's the num. read), nor does it update offset.
+
+ 00B8  53				push	bx
+ 00B9  51				push	cx
+ 00BA  52				push	dx
+ 00BB  57				push	di
+ 00BC  9C				pushf
+
+ 00BD  BF 00AE R			mov	di, OFFSET CurrentLine
+
+ 00C0				top:
+
+ 00C0  B8 3F00				mov	ax, READF
+ 00C3  8B 1E 007F R			mov	bx, FileHandle
+ 00C7  B9 0001				mov	cx, 1
+ 00CA  8B D7				mov	dx, di
+ 00CC  CD 21				int	DOS
+
+ 00CE  B3 0A				mov	bl, 0Ah
+ 00D0  47				inc	di
+ 00D1  38 5D FF				cmp	[di - 1], bl
+ 00D4  75 EA				jnz	top
+
+ 00D6  B3 21				mov	bl, "!"
+ 00D8  88 5D FF				mov	[di - 1], bl
+ 00DB  B3 00				mov	bl, 0
+ 00DD  88 5D FE				mov	[di - 2], bl
+
+ 00E0  9D				popf
+ 00E1  5F				pop	di
+ 00E2  5A				pop	dx
+ 00E3  59				pop	cx
+ 00E4  5B				pop	bx
+ 00E5  C3				ret
+ 00E6				ReadNextLine ENDP
+
+				; --------------------
+				;|                    |
+				;|    Mute/Unmute     |
+				;|      Speaker       |
+				;|                    |
+				; --------------------
+ 00E6				MuteSpeaker PROC
+ 00E6  9C				pushf
+ 00E7  C6 06 0081 R 01			mov	Muted, 1
+ 00EC  9D				popf
+ 00ED  C3				ret
+ 00EE				MuteSpeaker ENDP
+
+ 00EE				UnmuteSpeaker PROC
+ 00EE  9C				pushf
+ 00EF  C6 06 0081 R 01			mov	Muted, 1
+ 00F4  9D				popf
+ 00F5  C3				ret
+ 00F6				UnmuteSpeaker ENDP
+
+				; --------------------
+				;|                    |
+				;|      Speaker       |
+				;|      On/Off        |
+				;|                    |
+				; --------------------
+ 00F6				SpeakerOn PROC
+ 00F6  50				push	ax
+ 00F7  9C				pushf
+
+ 00F8  80 3E 0081 R 01			cmp	Muted, 1
+ 00FD  74 06				jz	done
+
+ 00FF  E4 61				in	al, SPEAKER_PORT
+ 0101  0C 03				or	al, 03h
+ 0103  E6 61				out	SPEAKER_PORT, al
+
+ 0105				done:
+ 0105  9D				popf
+ 0106  58				pop	ax
+ 0107  C3				ret
+ 0108				SpeakerOn ENDP
+
+ 0108				SpeakerOff PROC
+ 0108  50				push	ax
+ 0109  9C				pushf
+
+ 010A  E4 61				in	al, SPEAKER_PORT
+ 010C  24 FC				and	al, 0FCh
+ 010E  E6 61				out	SPEAKER_PORT, al
+
+ 0110  9D				popf
+ 0111  58				pop	ax
+ 0112  C3				ret
+ 0113				SpeakerOff ENDP
+
+				; --------------------
+				;|                    |
+				;|       Play         |
+				;|       Count        |
+				;|                    |
+				; --------------------
+ 0113				PlayCount PROC
+				; Frequency is found in dx
+
+ 0113  50				push	ax
+ 0114  9C				pushf
+
+ 0115  B0 B6				mov	al, READY_TIMER			; Get the timer ready
+ 0117  E6 43				out	TIMER_CONTROL_PORT, al
+
+ 0119  8A C2				mov	al, dl
+ 011B  E6 42				out	TIMER_DATA_PORT, al
+
+ 011D  8A C6				mov	al, dh
+ 011F  E6 42				out	TIMER_DATA_PORT, al
+
+ 0121  9D				popf
+ 0122  58				pop	ax
+ 0123  C3				ret
+ 0124				PlayCount ENDP
+
+				; --------------------
+				;|                    |
+				;|       Delay        |
+				;|                    |
+				; --------------------
+ 0124				Delay PROC
+				; Expects the value in microseconds to be in WaitInterval. Delays that long.
+
+ 0124  50				push	ax
+ 0125  51				push	cx
+ 0126  52				push	dx
+ 0127  9C				pushf
+
+ 0128  B4 86				mov	ah, TIMER_WAIT
+ 012A  8B 0E 0084 R			mov	cx, WaitBot
+ 012E  8B 16 0082 R			mov	dx, WaitTop
+ 0132  CD 15				int	TIMER
+
+ 0134  9D				popf
+ 0135  5A				pop	dx
+ 0136  59				pop	cx
+ 0137  58				pop	ax
+ 0138  C3				ret
+ 0139				Delay ENDP
+
+				; --------------------
+				;|                    |
+				;|     Store Beat     |
+				;|    Information     |
+				;|                    |
+				; --------------------
+
+ 0139				StoreBeatInfo PROC
+				; Stores it, and the the beat length, in memory.
+ 0139  66| 50				push	eax
+ 013B  66| 51				push	ecx
+ 013D  66| 52				push	edx
+ 013F  57				push	di
+ 0140  9C				pushf
+
+ 0141  BF 0088 R			mov	di, OFFSET BPM
+ 0144  89 15				mov	[di], dx
+
+ 0146  66| 8B CA			mov	ecx, edx		; Use ecx because edx is used in div
+ 0149  66| B8 03938700			mov	eax, ONE_MINUTE
+ 014F  66| BA 00000000			mov	edx, 0
+ 0155  66| F7 F1			div	ecx
+
+ 0158  BF 008A R			mov	di, OFFSET BeatLength	; Store BeatLength in memory
+ 015B  66| 89 05			mov	[di], eax
+
+ 015E  9D				popf
+ 015F  5F				pop	di
+ 0160  66| 5A				pop	edx
+ 0162  66| 59				pop	ecx
+ 0164  66| 58				pop	eax
+ 0166  C3				ret
+ 0167				StoreBeatInfo ENDP
+
+				; --------------------
+				;|                    |
+				;|     Set Note       |
+				;|     Lengths        |
+				;|                    |
+				; --------------------
+
+ 0167				BootstrapNotes PROC
+				; Sets all notes based on the 1/16 note.
+				; Expects the 1/16 length to be set in memory.
+
+ 0167  66| 52				push	edx
+ 0169  57				push	di
+ 016A  56				push	si
+ 016B  9C				pushf
+
+ 016C  BE 009E R			mov	si, OFFSET SixteenthNoteLength
+ 016F  66| 8B 14			mov	edx, [si]			; Load 1/16 length
+ 0172  66| D1 EA			shr	edx, 1
+ 0175  BF 00A2 R			mov	di, OFFSET ThirtysecondNoteLength
+ 0178  66| 89 15			mov	[di], edx
+
+ 017B  BE 009E R			mov	si, OFFSET SixteenthNoteLength
+ 017E  66| 8B 14			mov	edx, [si]			; Load 1/16 length
+
+ 0181  66| D1 E2			shl	edx, 1				; Double it for 1/8 length
+ 0184  BF 009A R			mov	di, OFFSET EighthNoteLength
+ 0187  66| 89 15			mov	[di], edx			; Set 1/8 length
+
+ 018A  66| D1 E2			shl	edx, 1				; Double it for 1/4 length
+ 018D  BF 0096 R			mov	di, OFFSET QuarterNoteLength
+ 0190  66| 89 15			mov	[di], edx			; Set 1/4 length
+
+ 0193  66| D1 E2			shl	edx, 1				; Double it for 1/2 length
+ 0196  BF 0092 R			mov	di, OFFSET HalfNoteLength
+ 0199  66| 89 15			mov	[di], edx			; Set 1/2 length
+
+ 019C  66| D1 E2			shl	edx, 1				; Double it for whole length
+ 019F  BF 008E R			mov	di, OFFSET WholeNoteLength
+ 01A2  66| 89 15			mov	[di], edx			; Set whole length
+
+ 01A5  9D				popf
+ 01A6  5E				pop	si
+ 01A7  5F				pop	di
+ 01A8  66| 5A				pop	edx
+ 01AA  C3				ret
+ 01AB				BootstrapNotes ENDP
+
+ 01AB				SetNoteLengths PROC
+				; Sets the note lengths in memory based on the time signature in memory.
+
+ 01AB  66| 50				push	eax
+ 01AD  66| 52				push	edx
+ 01AF  57				push	di
+ 01B0  56				push	si
+ 01B1  9C				pushf
+
+ 01B2  BE 0086 R			mov	si, OFFSET TimeSignature
+ 01B5  46				inc	si
+ 01B6  8A 04				mov	al, [si]		; Load the bottom half of time sig.
+
+ 01B8  3C 02				cmp	al, 2
+ 01BA  74 0C				jz	half
+
+ 01BC  3C 04				cmp	al, 4
+ 01BE  74 1D				jz	quarter
+
+ 01C0  3C 08				cmp	al, 8
+ 01C2  74 2E				jz	eighth
+
+ 01C4  3C 10				cmp	al, 16
+ 01C6  74 3E				jz	sixteenth
+
+ 01C8				half:
+ 01C8  BE 008A R			mov	si, OFFSET BeatLength
+ 01CB  BF 009E R			mov	di, OFFSET SixteenthNoteLength
+ 01CE  66| 8B 14			mov	edx, [si]
+ 01D1  66| C1 EA 03			shr	edx, 3				; Eight 1/16 per 1/8
+ 01D5  66| 89 15			mov	[di], edx
+ 01D8  E8 FF8C				call	BootstrapNotes
+ 01DB  EB 38				jmp	done
+
+ 01DD				quarter:
+ 01DD  BE 008A R			mov	si, OFFSET BeatLength
+ 01E0  BF 009E R			mov	di, OFFSET SixteenthNoteLength
+ 01E3  66| 8B 14			mov	edx, [si]
+ 01E6  66| C1 EA 02			shr	edx, 2				; Four 1/16 per 1/8
+ 01EA  66| 89 15			mov	[di], edx
+ 01ED  E8 FF77				call	BootstrapNotes
+ 01F0  EB 23				jmp	done
+
+ 01F2				eighth:
+ 01F2  BE 008A R			mov	si, OFFSET BeatLength
+ 01F5  BF 009E R			mov	di, OFFSET SixteenthNoteLength
+ 01F8  66| 8B 14			mov	edx, [si]
+ 01FB  66| D1 EA			shr	edx, 1				; Two 1/16 per 1/8
+ 01FE  66| 89 15			mov	[di], edx
+ 0201  E8 FF63				call	BootstrapNotes
+ 0204  EB 0F				jmp	done
+
+ 0206				sixteenth:
+ 0206  BE 008A R			mov	si, OFFSET BeatLength
+ 0209  BF 009E R			mov	di, OFFSET SixteenthNoteLength
+ 020C  66| 8B 14			mov	edx, [si]
+ 020F  66| 89 15			mov	[di], edx
+ 0212  E8 FF52				call	BootstrapNotes
+
+ 0215				done:
+ 0215  9D				popf
+ 0216  5E				pop	si
+ 0217  5F				pop	di
+ 0218  66| 5A				pop	edx
+ 021A  66| 58				pop	eax
+ 021C  C3				ret
+ 021D				SetNoteLengths ENDP
+
+				; --------------------
+				;|                    |
+				;|    Set Key Num.    |
+				;|                    |
+				; --------------------
+ 0534				.data
+ 0534 49 6E 76 61 6C 69		KeyAccidentalErrorMsg BYTE "Invalid key signature accidental! Terminating.", 0
+       64 20 6B 65 79 20
+       73 69 67 6E 61 74
+       75 72 65 20 61 63
+       63 69 64 65 6E 74
+       61 6C 21 20 54 65
+       72 6D 69 6E 61 74
+       69 6E 67 2E 00
+ 0563 49 6E 76 61 6C 69		KeyNoteErrorMsg BYTE "Invalid key signature note! Terminating.", 0
+       64 20 6B 65 79 20
+       73 69 67 6E 61 74
+       75 72 65 20 6E 6F
+       74 65 21 20 54 65
+       72 6D 69 6E 61 74
+       69 6E 67 2E 00
+ 021D				.code
+ 021D				SetKeyNumber PROC
+				; Set the KeySigNumber value in memory
+
+ 021D  9C				pushf
+
+ 021E  80 3E 00AC R 62			cmp	KeySigAccidental, "b"
+ 0223  0F 84 014A			jz	flats
+ 0227  80 3E 00AC R 23			cmp	KeySigAccidental, "#"
+ 022C  74 0C				jz	sharps
+ 022E  80 3E 00AC R 30			cmp	KeySigAccidental, "0"
+ 0233  0F 84 0275			jz	none
+ 0237  E9 0279				jmp	accidental_error
+
+
+ 023A				sharps:
+ 023A				check_C:
+ 023A  80 3E 00AA R 43			cmp	KeySigNote, "C"
+ 023F  75 11				jnz	check_am
+ 0241  80 3E 00AB R 23			cmp	KeySigNote + 1, "#"
+ 0246  0F 84 00F7			jz	check_Cs
+ 024A  C6 06 00AD R 00			mov	KeySigNumber, 0
+ 024F  E9 025F				jmp	done
+ 0252				check_am:
+ 0252  80 3E 00AA R 61			cmp	KeySigNote, "a"
+ 0257  75 11				jnz	check_G
+ 0259  80 3E 00AB R 62			cmp	KeySigNote + 1, "b"
+ 025E  0F 84 00F5			jz	check_asm
+ 0262  C6 06 00AD R 00			mov	KeySigNumber, 0
+ 0267  E9 0247				jmp	done
+ 026A				check_G:
+ 026A  80 3E 00AA R 47			cmp	KeySigNote, "G"
+ 026F  75 08				jnz	check_em
+ 0271  C6 06 00AD R 01			mov	KeySigNumber, 1
+ 0276  E9 0238				jmp	done
+ 0279				check_em:
+ 0279  80 3E 00AA R 65			cmp	KeySigNote, "e"
+ 027E  75 08				jnz	check_D
+ 0280  C6 06 00AD R 01			mov	KeySigNumber, 1
+ 0285  E9 0229				jmp	done
+ 0288				check_D:
+ 0288  80 3E 00AA R 44			cmp	KeySigNote, "D"
+ 028D  75 08				jnz	check_bm
+ 028F  C6 06 00AD R 02			mov	KeySigNumber, 2
+ 0294  E9 021A				jmp	done
+ 0297				check_bm:
+ 0297  80 3E 00AA R 62			cmp	KeySigNote, "b"
+ 029C  75 08				jnz	check_A
+ 029E  C6 06 00AD R 02			mov	KeySigNumber, 2
+ 02A3  E9 020B				jmp	done
+ 02A6				check_A:
+ 02A6  80 3E 00AA R 41			cmp	KeySigNote, "A"
+ 02AB  75 08				jnz	check_fsm
+ 02AD  C6 06 00AD R 03			mov	KeySigNumber, 3
+ 02B2  E9 01FC				jmp	done
+ 02B5				check_fsm:
+ 02B5  80 3E 00AA R 66			cmp	KeySigNote, "f"
+ 02BA  75 0F				jnz	check_E
+ 02BC  80 3E 00AB R 23			cmp	KeySigNote + 1, "#"
+ 02C1  75 08				jnz	check_E
+ 02C3  C6 06 00AD R 03			mov	KeySigNumber, 3
+ 02C8  E9 01E6				jmp	done
+ 02CB				check_E:
+ 02CB  80 3E 00AA R 45			cmp	KeySigNote, "E"
+ 02D0  75 08				jnz	check_csm
+ 02D2  C6 06 00AD R 04			mov	KeySigNumber, 4
+ 02D7  E9 01D7				jmp	done
+ 02DA				check_csm:
+ 02DA  80 3E 00AA R 63			cmp	KeySigNote, "c"
+ 02DF  75 0F				jnz	check_B
+ 02E1  80 3E 00AB R 23			cmp	KeySigNote + 1, "#"
+ 02E6  75 08				jnz	check_B
+ 02E8  C6 06 00AD R 04			mov	KeySigNumber, 4
+ 02ED  E9 01C1				jmp	done
+ 02F0				check_B:
+ 02F0  80 3E 00AA R 42			cmp	KeySigNote, "B"
+ 02F5  75 08				jnz	check_gsm
+ 02F7  C6 06 00AD R 05			mov	KeySigNumber, 5
+ 02FC  E9 01B2				jmp	done
+ 02FF				check_gsm:
+ 02FF  80 3E 00AA R 67			cmp	KeySigNote, "g"
+ 0304  75 0F				jnz	check_Fs
+ 0306  80 3E 00AB R 23			cmp	KeySigNote + 1, "#"
+ 030B  75 08				jnz	check_Fs
+ 030D  C6 06 00AD R 05			mov	KeySigNumber, 5
+ 0312  E9 019C				jmp	done
+ 0315				check_Fs:
+ 0315  80 3E 00AA R 46			cmp	KeySigNote, "F"
+ 031A  75 0F				jnz	check_dsm
+ 031C  80 3E 00AB R 23			cmp	KeySigNote + 1, "#"
+ 0321  75 08				jnz	check_dsm
+ 0323  C6 06 00AD R 06			mov	KeySigNumber, 6
+ 0328  E9 0186				jmp	done
+ 032B				check_dsm:
+ 032B  80 3E 00AA R 64			cmp	KeySigNote, "d"
+ 0330  75 0F				jnz	check_Cs
+ 0332  80 3E 00AB R 23			cmp	KeySigNote + 1, "#"
+ 0337  75 08				jnz	check_Cs
+ 0339  C6 06 00AD R 06			mov	KeySigNumber, 6
+ 033E  E9 0170				jmp	done
+ 0341				check_Cs:
+ 0341  80 3E 00AA R 43			cmp	KeySigNote, "C"
+ 0346  75 0F				jnz	check_asm
+ 0348  80 3E 00AB R 23			cmp	KeySigNote + 1, "#"
+ 034D  75 08				jnz	check_asm
+ 034F  C6 06 00AD R 07			mov	KeySigNumber, 7
+ 0354  E9 015A				jmp	done
+ 0357				check_asm:
+ 0357  80 3E 00AA R 61			cmp	KeySigNote, "a"
+ 035C  0F 85 015E			jnz	note_error
+ 0360  80 3E 00AB R 23			cmp	KeySigNote + 1, "#"
+ 0365  0F 85 0155			jnz	note_error
+ 0369  C6 06 00AD R 07			mov	KeySigNumber, 7
+ 036E  E9 0140				jmp	done
+
+ 0371				flats:
+ 0371				check_C2:
+ 0371  80 3E 00AA R 43			cmp	KeySigNote, "C"
+ 0376  75 11				jnz	check_am2
+ 0378  80 3E 00AB R 62			cmp	KeySigNote + 1, "b"
+ 037D  0F 84 0101			jz	check_Cf
+ 0381  C6 06 00AD R 00			mov	KeySigNumber, 0
+ 0386  E9 0128				jmp	done
+ 0389				check_am2:
+ 0389  80 3E 00AA R 61			cmp	KeySigNote, "a"
+ 038E  75 11				jnz	check_F
+ 0390  80 3E 00AB R 62			cmp	KeySigNote + 1, "b"
+ 0395  0F 84 00FE			jz	check_afm
+ 0399  C6 06 00AD R 00			mov	KeySigNumber, 0
+ 039E  E9 0110				jmp	done
+ 03A1				check_F:
+ 03A1  80 3E 00AA R 46			cmp	KeySigNote, "F"
+ 03A6  75 08				jnz	check_dm
+ 03A8  C6 06 00AD R 01			mov	KeySigNumber, 1
+ 03AD  E9 0101				jmp	done
+ 03B0				check_dm:
+ 03B0  80 3E 00AA R 64			cmp	KeySigNote, "d"
+ 03B5  75 08				jnz	check_Bf
+ 03B7  C6 06 00AD R 01			mov	KeySigNumber, 1
+ 03BC  E9 00F2				jmp	done
+ 03BF				check_Bf:
+ 03BF  80 3E 00AA R 42			cmp	KeySigNote, "B"
+ 03C4  75 0F				jnz	check_gm
+ 03C6  80 3E 00AB R 62			cmp	KeySigNote + 1, "b"
+ 03CB  75 08				jnz	check_gm
+ 03CD  C6 06 00AD R 02			mov	KeySigNumber, 2
+ 03D2  E9 00DC				jmp	done
+ 03D5				check_gm:
+ 03D5  80 3E 00AA R 67			cmp	KeySigNote, "g"
+ 03DA  75 08				jnz	check_Ef
+ 03DC  C6 06 00AD R 02			mov	KeySigNumber, 2
+ 03E1  E9 00CD				jmp	done
+ 03E4				check_Ef:
+ 03E4  80 3E 00AA R 45			cmp	KeySigNote, "E"
+ 03E9  75 0F				jnz	check_cm
+ 03EB  80 3E 00AB R 62			cmp	KeySigNote + 1, "b"
+ 03F0  75 08				jnz	check_cm
+ 03F2  C6 06 00AD R 03			mov	KeySigNumber, 3
+ 03F7  E9 00B7				jmp	done
+ 03FA				check_cm:
+ 03FA  80 3E 00AA R 63			cmp	KeySigNote, "c"
+ 03FF  75 08				jnz	check_Af
+ 0401  C6 06 00AD R 03			mov	KeySigNumber, 3
+ 0406  E9 00A8				jmp	done
+ 0409				check_Af:
+ 0409  80 3E 00AA R 41			cmp	KeySigNote, "A"
+ 040E  75 0F				jnz	check_fm
+ 0410  80 3E 00AB R 23			cmp	KeySigNote + 1, "#"
+ 0415  75 08				jnz	check_fm
+ 0417  C6 06 00AD R 04			mov	KeySigNumber, 4
+ 041C  E9 0092				jmp	done
+ 041F				check_fm:
+ 041F  80 3E 00AA R 66			cmp	KeySigNote, "f"
+ 0424  75 08				jnz	check_Df
+ 0426  C6 06 00AD R 04			mov	KeySigNumber, 4
+ 042B  E9 0083				jmp	done
+ 042E				check_Df:
+ 042E  80 3E 00AA R 44			cmp	KeySigNote, "D"
+ 0433  75 0E				jnz	check_bfm
+ 0435  80 3E 00AB R 62			cmp	KeySigNote + 1, "b"
+ 043A  75 07				jnz	check_bfm
+ 043C  C6 06 00AD R 05			mov	KeySigNumber, 5
+ 0441  EB 6E				jmp	done
+ 0443				check_bfm:
+ 0443  80 3E 00AA R 62			cmp	KeySigNote, "b"
+ 0448  75 0E				jnz	check_Gf
+ 044A  80 3E 00AB R 62			cmp	KeySigNote + 1, "b"
+ 044F  75 07				jnz	check_Gf
+ 0451  C6 06 00AD R 05			mov	KeySigNumber, 5
+ 0456  EB 59				jmp	done
+ 0458				check_Gf:
+ 0458  80 3E 00AA R 47			cmp	KeySigNote, "G"
+ 045D  75 0E				jnz	check_cfm
+ 045F  80 3E 00AB R 62			cmp	KeySigNote + 1, "b"
+ 0464  75 07				jnz	check_cfm
+ 0466  C6 06 00AD R 06			mov	KeySigNumber, 6
+ 046B  EB 44				jmp	done
+ 046D				check_cfm:
+ 046D  80 3E 00AA R 63			cmp	KeySigNote, "c"
+ 0472  75 0E				jnz	check_Cf
+ 0474  80 3E 00AB R 62			cmp	KeySigNote + 1, "b"
+ 0479  75 07				jnz	check_Cf
+ 047B  C6 06 00AD R 06			mov	KeySigNumber, 6
+ 0480  EB 2F				jmp	done
+ 0482				check_Cf:
+ 0482  80 3E 00AA R 43			cmp	KeySigNote, "C"
+ 0487  75 0E				jnz	check_afm
+ 0489  80 3E 00AB R 62			cmp	KeySigNote + 1, "b"
+ 048E  75 07				jnz	check_afm
+ 0490  C6 06 00AD R 07			mov	KeySigNumber, 7
+ 0495  EB 1A				jmp	done
+ 0497				check_afm:
+ 0497  80 3E 00AA R 61			cmp	KeySigNote, "a"
+ 049C  75 20				jnz	note_error
+ 049E  80 3E 00AB R 62			cmp	KeySigNote + 1, "b"
+ 04A3  75 19				jnz	note_error
+ 04A5  C6 06 00AD R 07			mov	KeySigNumber, 7
+ 04AA  EB 05				jmp	done
+
+ 04AC				none:
+ 04AC  C6 06 00AD R 00			mov	KeySigNumber, 0
+ 04B1				done:
+ 04B1  9D				popf
+ 04B2  C3				ret
+
+ 04B3				accidental_error:
+ 04B3  BA 0534 R			mov	dx, OFFSET KeyAccidentalErrorMsg
+ 04B6  E8 0000 E			call	WriteString
+ 04B9  B8 4C00				mov	ax, DOS_EXIT
+ 04BC  CD 21				int	DOS
+ 04BE				note_error:
+ 04BE  BA 0563 R			mov	dx, OFFSET KeyNoteErrorMsg
+ 04C1  E8 0000 E			call	WriteString
+ 04C4  B8 4C00				mov	ax, DOS_EXIT
+ 04C7  CD 21				int	DOS
+ 04C9				SetKeyNumber ENDP
+
+				; --------------------
+				;|                    |
+				;|     PlayNote       |
+				;|                    |
+				; --------------------
+
+ 058C				.data
+ 058C 55 6E 61 63 63 65		NoteErrorMsg BYTE "Unacceptable note! Terminating.", 0
+       70 74 61 62 6C 65
+       20 6E 6F 74 65 21
+       20 54 65 72 6D 69
+       6E 61 74 69 6E 67
+       2E 00
+ 05AC 55 6E 61 63 63 65		LengthErrorMsg BYTE "Unacceptable note length! Terminating.", 0
+       70 74 61 62 6C 65
+       20 6E 6F 74 65 20
+       6C 65 6E 67 74 68
+       21 20 54 65 72 6D
+       69 6E 61 74 69 6E
+       67 2E 00
+ 04C9				.code
+ 04C9				PlayNote PROC
+				; Expects the octave, note (letter), sharp, and length to be in memory.
+
+ 04C9  66| 50				push	eax
+ 04CB  66| 53				push	ebx
+ 04CD  66| 52				push	edx
+ 04CF  57				push	di
+ 04D0  56				push	si
+ 04D1  9C				pushf
+
+ 04D2  C6 06 0081 R 00			mov	Muted, 0
+ 04D7  BE 00BF R			mov	si, OFFSET Octave1
+ 04DA  A0 00A6 R			mov	al, CurrentOctave
+ 04DD  FE C8				dec	al
+ 04DF  25 00FF				and	ax, 00FFh
+ 04E2  BB 0018				mov	bx, 24
+ 04E5  F7 E3				mul	bx
+ 04E7  03 F0				add	si, ax			; Now we are at the correct octave.
+
+ 04E9				check_a:
+ 04E9  A0 00A7 R			mov	al, CurrentNote
+ 04EC  3C 41				cmp	al, "A"
+ 04EE  75 2E				jnz	check_b
+ 04F0  80 3E 00AC R 23			cmp	KeySigAccidental, "#"
+ 04F5  75 0F				jnz	check_ab
+ 04F7  80 3E 00AD R 05			cmp	KeySigNumber, 5
+ 04FC  0F 8C 0152			jl	check_sharp
+ 0500  83 C6 02				add	si, 2
+ 0503  E9 014C				jmp	check_sharp
+ 0506				check_ab:
+ 0506  80 3E 00AC R 62			cmp	KeySigAccidental, "b"
+ 050B  0F 85 0143			jnz	check_sharp
+ 050F  80 3E 00AD R 03			cmp	KeySigNumber, 3
+ 0514  0F 8C 013A			jl	check_sharp
+ 0518  83 EE 02				sub	si, 2
+ 051B  E9 0134				jmp	check_sharp
+ 051E				check_b:
+ 051E  A0 00A7 R			mov	al, CurrentNote
+ 0521  3C 42				cmp	al, "B"
+ 0523  75 31				jnz	check_c
+ 0525  83 C6 04				add	si, 4
+ 0528  80 3E 00AC R 23			cmp	KeySigAccidental, "#"
+ 052D  75 0F				jnz	check_bb
+ 052F  80 3E 00AD R 07			cmp	KeySigNumber, 7
+ 0534  0F 8C 011A			jl	check_sharp
+ 0538  83 C6 02				add	si, 2
+ 053B  E9 0114				jmp	check_sharp
+ 053E				check_bb:
+ 053E  80 3E 00AC R 62			cmp	KeySigAccidental, "b"
+ 0543  0F 85 010B			jnz	check_sharp
+ 0547  80 3E 00AD R 01			cmp	KeySigNumber, 1
+ 054C  0F 8C 0102			jl	check_sharp
+ 0550  83 EE 02				sub	si, 2
+ 0553  E9 00FC				jmp	check_sharp
+ 0556				check_c:
+ 0556  3C 43				cmp	al, "C"
+ 0558  75 31				jnz	check_d
+ 055A  83 C6 06				add	si, 6
+ 055D  80 3E 00AC R 23			cmp	KeySigAccidental, "#"
+ 0562  75 0F				jnz	check_cb
+ 0564  80 3E 00AD R 02			cmp	KeySigNumber, 2
+ 0569  0F 8C 00E5			jl	check_sharp
+ 056D  83 C6 02				add	si, 2
+ 0570  E9 00DF				jmp	check_sharp
+ 0573				check_cb:
+ 0573  80 3E 00AC R 62			cmp	KeySigAccidental, "b"
+ 0578  0F 85 00D6			jnz	check_sharp
+ 057C  80 3E 00AD R 06			cmp	KeySigNumber, 6
+ 0581  0F 8C 00CD			jl	check_sharp
+ 0585  83 EE 02				sub	si, 2
+ 0588  E9 00C7				jmp	check_sharp
+ 058B				check_d:
+ 058B  3C 44				cmp	al, "D"
+ 058D  75 31				jnz	check_e
+ 058F  83 C6 0A				add	si, 10
+ 0592  80 3E 00AC R 23			cmp	KeySigAccidental, "#"
+ 0597  75 0F				jnz	check_db
+ 0599  80 3E 00AD R 04			cmp	KeySigNumber, 4
+ 059E  0F 8C 00B0			jl	check_sharp
+ 05A2  83 C6 02				add	si, 2
+ 05A5  E9 00AA				jmp	check_sharp
+ 05A8				check_db:
+ 05A8  80 3E 00AC R 62			cmp	KeySigAccidental, "b"
+ 05AD  0F 85 00A1			jnz	check_sharp
+ 05B1  80 3E 00AD R 04			cmp	KeySigNumber, 4
+ 05B6  0F 8C 0098			jl	check_sharp
+ 05BA  83 EE 02				sub	si, 2
+ 05BD  E9 0092				jmp	check_sharp
+ 05C0				check_e:
+ 05C0  3C 45				cmp	al, "E"
+ 05C2  75 29				jnz	check_f
+ 05C4  83 C6 0E				add	si, 14
+ 05C7  80 3E 00AC R 23			cmp	KeySigAccidental, "#"
+ 05CC  75 0C				jnz	check_eb
+ 05CE  80 3E 00AD R 06			cmp	KeySigNumber, 6
+ 05D3  7C 7D				jl	check_sharp
+ 05D5  83 C6 02				add	si, 2
+ 05D8  EB 78				jmp	check_sharp
+ 05DA				check_eb:
+ 05DA  80 3E 00AC R 62			cmp	KeySigAccidental, "b"
+ 05DF  75 71				jnz	check_sharp
+ 05E1  80 3E 00AD R 02			cmp	KeySigNumber, 2
+ 05E6  7C 6A				jl	check_sharp
+ 05E8  83 EE 02				sub	si, 2
+ 05EB  EB 65				jmp	check_sharp
+ 05ED				check_f:
+ 05ED  3C 46				cmp	al, "F"
+ 05EF  75 29				jnz	check_g
+ 05F1  83 C6 10				add	si, 16
+ 05F4  80 3E 00AC R 23			cmp	KeySigAccidental, "#"
+ 05F9  75 0C				jnz	check_fb
+ 05FB  80 3E 00AD R 01			cmp	KeySigNumber, 1
+ 0600  7C 50				jl	check_sharp
+ 0602  83 C6 02				add	si, 2
+ 0605  EB 4B				jmp	check_sharp
+ 0607				check_fb:
+ 0607  80 3E 00AC R 62			cmp	KeySigAccidental, "b"
+ 060C  75 44				jnz	check_sharp
+ 060E  80 3E 00AD R 07			cmp	KeySigNumber, 7
+ 0613  7C 3D				jl	check_sharp
+ 0615  83 EE 02				sub	si, 2
+ 0618  EB 38				jmp	check_sharp
+ 061A				check_g:
+ 061A  3C 47				cmp	al, "G"
+ 061C  75 29				jnz	check_rest
+ 061E  83 C6 14				add	si, 20
+ 0621  80 3E 00AC R 23			cmp	KeySigAccidental, "#"
+ 0626  75 0C				jnz	check_gb
+ 0628  80 3E 00AD R 03			cmp	KeySigNumber, 3
+ 062D  7C 23				jl	check_sharp
+ 062F  83 C6 02				add	si, 2
+ 0632  EB 1E				jmp	check_sharp
+ 0634				check_gb:
+ 0634  80 3E 00AC R 62			cmp	KeySigAccidental, "b"
+ 0639  75 17				jnz	check_sharp
+ 063B  80 3E 00AD R 05			cmp	KeySigNumber, 5
+ 0640  7C 10				jl	check_sharp
+ 0642  83 EE 02				sub	si, 2
+ 0645  EB 0B				jmp	check_sharp
+ 0647				check_rest:
+ 0647  3C 52				cmp	al, "R"
+ 0649  0F 85 00B2			jnz	note_error
+ 064D  C6 06 0081 R 01			mov	Muted, 1
+
+ 0652				check_sharp:
+ 0652  80 3E 00A8 R 23			cmp	CurrentAccidental, "#"
+ 0657  75 03				jnz	check_flat
+ 0659  83 C6 02				add	si, 2
+
+ 065C				check_flat:
+ 065C  80 3E 00A8 R 62			cmp	CurrentAccidental, "b"
+ 0661  75 03				jnz 	check_length
+ 0663  83 EE 02				sub	si, 2
+
+ 0666				check_length:
+ 0666  56				push	si				; Store the count location
+ 0667  80 3E 00A9 R 54			cmp	CurrentLength, "T"
+ 066C  75 0E				jnz	check_sixteenth
+ 066E  BF 0082 R			mov	di, OFFSET WaitInterval
+ 0671  BE 00A2 R			mov	si, OFFSET ThirtysecondNoteLength
+ 0674  66| 8B 04			mov	eax, [si]
+ 0677  66| 89 05			mov	[di], eax	
+ 067A  EB 67				jmp	play
+ 067C				check_sixteenth:
+ 067C  80 3E 00A9 R 53			cmp	CurrentLength, "S"
+ 0681  75 0E				jnz	check_eighth
+ 0683  BF 0082 R			mov	di, OFFSET WaitInterval
+ 0686  BE 009E R			mov	si, OFFSET SixteenthNoteLength
+ 0689  66| 8B 04			mov	eax, [si]
+ 068C  66| 89 05			mov	[di], eax
+ 068F  EB 52				jmp	play
+ 0691				check_eighth:
+ 0691  80 3E 00A9 R 45			cmp	CurrentLength, "E"
+ 0696  75 0E				jnz	check_quarter
+ 0698  BF 0082 R			mov	di, OFFSET WaitInterval
+ 069B  BE 009A R			mov	si, OFFSET EighthNoteLength
+ 069E  66| 8B 04			mov	eax, [si]
+ 06A1  66| 89 05			mov	[di], eax
+ 06A4  EB 3D				jmp	play
+ 06A6				check_quarter:
+ 06A6  80 3E 00A9 R 51			cmp	CurrentLength, "Q"
+ 06AB  75 0E				jnz	check_half
+ 06AD  BF 0082 R			mov	di, OFFSET WaitInterval
+ 06B0  BE 0096 R			mov	si, OFFSET QuarterNoteLength
+ 06B3  66| 8B 04			mov	eax, [si]
+ 06B6  66| 89 05			mov	[di], eax
+ 06B9  EB 28				jmp	play
+ 06BB				check_half:
+ 06BB  80 3E 00A9 R 48			cmp	CurrentLength, "H"
+ 06C0  75 0E				jnz	check_whole
+ 06C2  BF 0082 R			mov	di, OFFSET WaitInterval
+ 06C5  BE 0092 R			mov	si, OFFSET HalfNoteLength
+ 06C8  66| 8B 04			mov	eax, [si]
+ 06CB  66| 89 05			mov	[di], eax
+ 06CE  EB 13				jmp	play
+ 06D0				check_whole:
+ 06D0  80 3E 00A9 R 57			cmp	CurrentLength, "W"
+ 06D5  75 33				jnz	length_error
+ 06D7  BF 0082 R			mov	di, OFFSET WaitInterval
+ 06DA  BE 008E R			mov	si, OFFSET WholeNoteLength
+ 06DD  66| 8B 04			mov	eax, [si]
+ 06E0  66| 89 05			mov	[di], eax
+
+ 06E3				play:
+ 06E3  5E				pop	si				; Restore the count location
+ 06E4  8B 14				mov	dx, [si]			; Load the note
+ 06E6  E8 FA0D				call	SpeakerOn
+ 06E9  E8 FA27				call	PlayCount
+ 06EC  E8 FA35				call	Delay
+ 06EF  E8 FA16				call	SpeakerOff
+ 06F2  E8 0280				call	DrawNextLine
+
+ 06F5				done:
+ 06F5  5E				pop	si
+ 06F6  5F				pop	di
+ 06F7  66| 5A				pop	edx
+ 06F9  66| 5B				pop	ebx
+ 06FB  66| 58				pop	eax
+ 06FD  9D				popf
+
+ 06FE  C3				ret
+
+ 06FF				note_error:
+ 06FF  BA 058C R			mov	dx, OFFSET NoteErrorMsg
+ 0702  E8 0000 E			call	WriteString
+ 0705  B8 4C00				mov	ax, DOS_EXIT
+ 0708  CD 21				int	DOS
+
+ 070A				length_error:
+ 070A  BA 05AC R			mov	dx, OFFSET LengthErrorMsg
+ 070D  E8 0000 E			call	WriteString
+ 0710  B8 4C00				mov	ax, DOS_EXIT
+ 0713  CD 21				int	DOS
+ 0715				PlayNote ENDP
+
+				; -------------------------
+				;|		           |
+				;|	Process Line	   |
+				;|			   |
+				; -------------------------
+
+ 0715				CopyBuffer PROC
+				; Copies the buffer from si to di for cx bytes
+ 0715  50				push	ax
+ 0716  51				push	cx
+ 0717  56				push	si
+ 0718  57				push	di
+ 0719  9C				pushf
+
+ 071A  EB 07				jmp	cond
+
+ 071C				top:
+ 071C  8A 04				mov	al, [si]
+ 071E  88 05				mov	[di], al
+ 0720  47				inc	di
+ 0721  46				inc	si
+ 0722  49				dec	cx
+
+ 0723				cond:
+ 0723  83 F9 00				cmp	cx, 0
+ 0726  77 F4				ja	top
+
+ 0728				done:
+ 0728  9D				popf
+ 0729  5F				pop	di
+ 072A  5E				pop	si
+ 072B  59				pop	cx
+ 072C  58				pop	ax
+ 072D  C3				ret
+ 072E				CopyBuffer ENDP
+
+ 05D3				.data
+ 05D3 49 6E 63 6F 72 72		FormatErrorMsg BYTE "Incorrect format! Terminating.", 0
+       65 63 74 20 66 6F
+       72 6D 61 74 21 20
+       54 65 72 6D 69 6E
+       61 74 69 6E 67 2E
+       00
+ 05F2 55 6E 61 63 63 65		OctaveErrorMsg BYTE "Unacceptable octave! Terminating.", 0
+       70 74 61 62 6C 65
+       20 6F 63 74 61 76
+       65 21 20 54 65 72
+       6D 69 6E 61 74 69
+       6E 67 2E 00
+ 072E				.code
+ 072E				ProcessLine PROC
+				; Expects the next line of the file to be in the CurrentLine buffer.
+				; Example format: 	"C	4	W"
+				; Plays that note.
+
+ 072E  50				push	ax
+ 072F  56				push	si
+ 0730  9C				pushf
+
+ 0731  BE 00AE R			mov	si, OFFSET CurrentLine		; Load the address
+
+ 0734				get_note:
+ 0734  8A 04				mov	al, [si]
+ 0736  A2 00A7 R			mov	CurrentNote, al			; Load the current note.
+ 0739  46				inc	si
+ 073A				get_accidental:
+ 073A  8A 04				mov	al, [si]
+ 073C  3C 09				cmp	al, "	"
+ 073E  75 07				jnz	check_sharp
+ 0740  C6 06 00A8 R 4E			mov	CurrentAccidental, "N"
+ 0745  EB 16				jmp	get_octave
+ 0747				check_sharp:
+ 0747  3C 23				cmp	al, "#"
+ 0749  75 08				jnz	check_flat
+ 074B  C6 06 00A8 R 23			mov	CurrentAccidental, "#"
+ 0750  46				inc	si
+ 0751  EB 0A				jmp	get_octave
+ 0753				check_flat:
+ 0753  3C 62				cmp	al, "b"
+ 0755  75 1D				jnz	format_error
+ 0757  C6 06 00A8 R 62			mov	CurrentAccidental, "b"
+ 075C  46				inc	si
+
+ 075D				get_octave:
+ 075D  46				inc	si
+ 075E  8A 04				mov	al, [si]
+ 0760  3C 38				cmp	al, "8"
+ 0762  77 1B				ja	octave_error
+ 0764  2C 30				sub	al, "0"
+ 0766  A2 00A6 R			mov	CurrentOctave, al
+ 0769  46				inc	si
+
+ 076A				get_length:
+ 076A  46				inc	si
+ 076B  8A 04				mov	al, [si]
+ 076D  A2 00A9 R			mov	CurrentLength, al
+
+ 0770				done:
+ 0770  9D				popf
+ 0771  5E				pop	si
+ 0772  58				pop	ax
+ 0773  C3				ret
+
+ 0774				format_error:
+ 0774  BA 05D3 R			mov	dx, OFFSET FormatErrorMsg
+ 0777  E8 0000 E			call	WriteString
+ 077A  B8 4C00				mov	ax, DOS_EXIT
+ 077D  CD 21				int	DOS
+ 077F				octave_error:
+ 077F  BA 05F2 R			mov	dx, OFFSET OctaveErrorMsg
+ 0782  E8 0000 E			call	WriteString
+ 0785  B8 4C00				mov	ax, DOS_EXIT
+ 0788  CD 21				int	DOS
+ 078A				ProcessLine ENDP
+
+				; -------------------------
+				;|		           |
+				;|	Play Song	   |
+				;|			   |
+				; -------------------------
+ 078A				PlaySong PROC
+				; Plays the song, ya!
+
+ 078A  50				push	ax
+ 078B  53				push	bx
+ 078C  51				push	cx
+ 078D  52				push	dx
+ 078E  9C				pushf
+
+
+ 078F  E8 F86E				call	GetCmdTail
+ 0792  E8 F8B0				call	CleanUpFileName
+ 0795  E8 F8EC				call	OpenFile
+
+ 0798  E8 014A				call	GetVideoMode
+ 079B  50				push	ax
+ 079C  B0 13				mov	al, 13h
+ 079E  E8 0151				call	SetVideoMode
+
+ 07A1  B0 00				mov	al, 0
+ 07A3  B4 00				mov	ah, 0
+ 07A5  B9 3500				mov	cx, 3500h
+ 07A8  E8 0167				call	SetPalleteColor
+
+ 07AB  B0 01				mov	al, 1
+ 07AD  B4 FF				mov	ah, 0FFh
+ 07AF  B9 0000				mov	cx, 00000h
+ 07B2  E8 015D				call	SetPalleteColor
+
+ 07B5  C7 06 00BD R 0171 R		mov	CurrentPixelOffset, OFFSET Pixels
+
+
+ 07BB  C7 06 0088 R 0000		mov	BPM, 0
+ 07C1				get_bpm:
+ 07C1  B8 3F00				mov	ax, READF
+ 07C4  8B 1E 007F R			mov	bx, FileHandle
+ 07C8  B9 0001				mov	cx, 1
+ 07CB  BA 00AE R			mov	dx, OFFSET TrashBuffer
+ 07CE  CD 21				int	DOS
+
+ 07D0  B0 0D				mov	al, 0Dh
+ 07D2  38 06 00AE R			cmp	TrashBuffer, al
+ 07D6  74 1A				jz	get_to_time
+ 07D8  A1 0088 R			mov	ax, BPM			; Multiply BPM by 10
+ 07DB  BB 000A				mov	bx, 10
+ 07DE  F7 E3				mul	bx
+ 07E0  A3 0088 R			mov	BPM, ax
+ 07E3  A0 00AE R			mov	al, TrashBuffer
+ 07E6  25 00FF				and	ax, 00FFh
+ 07E9  83 E8 30				sub	ax, "0"
+ 07EC  01 06 0088 R			add	BPM, ax			; Add the next number
+ 07F0  EB CF				jmp	get_bpm
+
+ 07F2				get_to_time:
+ 07F2  BF 00AE R			mov	di, OFFSET TrashBuffer	; Get to the next line
+ 07F5  B8 3F00				mov	ax, READF
+ 07F8  8B 1E 007F R			mov	bx, FileHandle
+ 07FC  B9 0001				mov	cx, 1
+ 07FF  8B D7				mov	dx, di
+ 0801  CD 21				int	DOS
+
+ 0803				get_time:
+ 0803  BF 00AE R			mov	di, OFFSET TrashBuffer
+ 0806  B8 3F00				mov	ax, READF
+ 0809  8B 1E 007F R			mov	bx, FileHandle
+ 080D  B9 0001				mov	cx, 1
+ 0810  8B D7				mov	dx, di			; Read in numerator
+ 0812  CD 21				int	DOS
+
+ 0814  8A 05				mov	al, [di]		; Place in memory
+ 0816  2C 30				sub	al, "0"
+ 0818  BF 0086 R			mov	di, OFFSET TimeSignature
+ 081B  88 05				mov	[di], al
+
+ 081D  BF 00AE R			mov	di, OFFSET TrashBuffer	; Skip /
+ 0820  B8 3F00				mov	ax, READF
+ 0823  8B 1E 007F R			mov	bx, FileHandle
+ 0827  B9 0001				mov	cx, 1
+ 082A  8B D7				mov	dx, di
+ 082C  CD 21				int	DOS
+
+ 082E  B8 3F00				mov	ax, READF
+ 0831  8B 1E 007F R			mov	bx, FileHandle
+ 0835  B9 0001				mov	cx, 1
+ 0838  8B D7				mov	dx, di			; Read in denominator
+ 083A  CD 21				int	DOS
+
+ 083C  8A 05				mov	al, [di]		; Place in memory
+ 083E  2C 30				sub	al, "0"
+ 0840  BF 0086 R			mov	di, OFFSET TimeSignature
+ 0843  88 45 01				mov	[di + 1], al
+
+ 0846				get_to_key:
+ 0846  BF 00AE R			mov	di, OFFSET TrashBuffer	; Get to the next line
+ 0849  B8 3F00				mov	ax, READF
+ 084C  8B 1E 007F R			mov	bx, FileHandle
+ 0850  B9 0002				mov	cx, 2
+ 0853  8B D7				mov	dx, di
+ 0855  CD 21				int	DOS
+
+ 0857				get_key:
+ 0857  B8 3F00				mov	ax, READF			; Read accidental
+ 085A  8B 1E 007F R			mov	bx, FileHandle
+ 085E  B9 0001				mov	cx, 1
+ 0861  BA 00AC R			mov	dx, OFFSET KeySigAccidental
+ 0864  CD 21				int	DOS
+
+ 0866  B8 3F00				mov	ax, READF			; Read note
+ 0869  8B 1E 007F R			mov	bx, FileHandle
+ 086D  B9 0001				mov	cx, 1
+ 0870  BA 00AA R			mov	dx, OFFSET KeySigNote
+ 0873  CD 21				int	DOS
+
+ 0875  B8 3F00				mov	ax, READF			; Read note pt. 2
+ 0878  8B 1E 007F R			mov	bx, FileHandle
+ 087C  B9 0001				mov	cx, 1
+ 087F  BA 00AB R			mov	dx, OFFSET KeySigNote + 1
+ 0882  CD 21				int	DOS
+
+ 0884  80 3E 00AB R 0D			cmp	KeySigNote + 1, 0Dh
+ 0889  75 07				jnz	skip_two_to_setup
+ 088B  C6 06 00AB R 00			mov	KeySigNote + 1, 0
+ 0890  74 0F				jz	skip_one_to_setup
+
+ 0892				skip_two_to_setup:
+ 0892  B8 3F00				mov	ax, READF
+ 0895  8B 1E 007F R			mov	bx, FileHandle
+ 0899  B9 0001				mov	cx, 1
+ 089C  BA 00AE R			mov	dx, OFFSET TrashBuffer
+ 089F  CD 21				int	DOS
+
+ 08A1				skip_one_to_setup:
+ 08A1  B8 3F00				mov	ax, READF
+ 08A4  8B 1E 007F R			mov	bx, FileHandle
+ 08A8  B9 0001				mov	cx, 1
+ 08AB  BA 00AE R			mov	dx, OFFSET TrashBuffer
+ 08AE  CD 21				int	DOS
+ 08B0				setup:
+ 08B0  8B 16 0088 R			mov	dx, BPM
+ 08B4  E8 F882				call	StoreBeatInfo
+ 08B7  E8 F8F1				call	SetNoteLengths
+ 08BA  E8 F960				call	SetKeyNumber
+ 08BD				play_notes:
+ 08BD  E8 F7F8				call	ReadNextLine
+ 08C0				cond:
+ 08C0  80 3E 00AF R 21			cmp	CurrentLine + 1, "!"
+ 08C5  74 08				jz	done
+ 08C7  E8 FE64				call	ProcessLine
+ 08CA  E8 FBFC				call	PlayNote
+ 08CD  EB EE				jmp	play_notes
+
+ 08CF				done:
+ 08CF  E8 F7D6				call	CloseFile
+ 08D2  58				pop	ax
+ 08D3  E8 001C				call	SetVideoMode	
+ 08D6  9D				popf
+ 08D7  5A				pop	dx
+ 08D8  59				pop	cx
+ 08D9  5B				pop	bx
+ 08DA  58				pop	ax
+ 08DB  C3				ret
+ 08DC				PlaySong ENDP
+
+				; -------------------------
+				;|		           |
+				;|     Read Character	   |
+				;|			   |
+				; -------------------------
+
+ 08DC				ReadCharacter Proc
+ 08DC  50				Push	ax
+ 08DD  9C				Pushf
+
+ 08DE  B4 01				mov	ah, READ_CHAR
+ 08E0  CD 21				int	DOS
+
+ 08E2  9D				popf
+ 08E3  58				pop	ax
+ 08E4  C3				ret
+ 08E5				ReadCharacter ENDP
+
+				; ---------------------------------------------------------------------------
+				; /////////////////////////// Graphics //////////////////////////////////////
+				; ---------------------------------------------------------------------------
+
+				; -------------------------
+				;|		           |
+				;|    Get Video Mode	   |
+				;|			   |
+				; -------------------------
+				;; Returns:
+				;; 	AL - Video Mode
+				;; 	AH - Number of character columns
+				;; 	BH - Active Page
+
+ 08E5				GetVideoMode PROC
+ 08E5  51				push	cx
+ 08E6  50				push	ax
+
+ 08E7  B4 0F				mov	ah, 0fh
+ 08E9  CD 10				int	BIOS
+ 08EB  8A C8				mov	cl, al
+
+ 08ED  58				pop	ax
+ 08EE  8A C1				mov	al, cl
+ 08F0  59				pop	cx
+ 08F1  C3				Ret	
+ 08F2				GetVideoMode Endp
+
+				; -------------------------
+				;|		           |
+				;|     Set Video Mode	   |
+				;|			   |
+				; -------------------------
+				;; Al - Video mode
+
+ 08F2				SetVideoMode PROC
+ 08F2  50				push	ax
+
+ 08F3  B4 00				mov	ah, 00
+ 08F5  CD 10				int	BIOS
+
+ 08F7  58				pop	ax
+ 08F8  C3				ret
+ 08F9				SetVideoMode ENDP
+
+				;; BH - Page number
+				;; CX - X
+				;; DX - Y
+				;;
+				;; Returns:
+				;;
+				;; AL - Color
+
+				; -------------------------
+				;|		           |
+				;|       ReadPixel	   |
+				;|			   |
+				; -------------------------
+ 08F9				ReadPixel PROC
+ 08F9  50				push	ax
+
+ 08FA  B4 0D				mov	ah, 0dh
+ 08FC  CD 10				int	BIOS
+
+ 08FE  58				pop	ax
+ 08FF  C3				ret
+ 0900				ReadPixel ENDP
+
+				; -------------------------
+				;|		           |
+				;|     Write Pixel	   |
+				;|			   |
+				; -------------------------
+				;; AL - Color
+				;; BH - Page
+				;; CX - X
+				;; DX - Y
+ 0900				WritePixel PROC
+ 0900  50				push	ax
+
+ 0901  B4 FC				mov	ah, 0fch
+ 0903  CD 10				int	BIOS
+					
+ 0905  58				pop	ax
+ 0906  C3				ret
+ 0907				WritePixel ENDP
+
+				; -------------------------
+				;|		           |
+				;|        SetPalette	   |
+				;|			   |
+				; -------------------------
+				;; BL - Palette id
+
+ 0907				SetPalette PROC
+ 0907  50				push	ax
+ 0908  53				push	bx
+
+ 0909  B4 0B				mov	ah, 0bh
+ 090B  B7 01				mov	bh, 01h
+ 090D  CD 10				int	BIOS
+
+ 090F  5B				pop	bx
+ 0910  58				pop	ax
+ 0911  C3				ret
+ 0912				SetPalette ENDP
+
+				; -------------------------
+				;|		           |
+				;|     Set Palette Color   |
+				;|			   |
+				; -------------------------
+				;; AL - Pallete Index
+				;; AH - Red
+				;; CX - Blue:Green
+
+ 0912				SetPalleteColor PROC
+ 0912  50				push	ax
+ 0913  52				push	dx
+
+ 0914  BA 03C8				mov	dx, 3c8h	; Video pallete port
+ 0917  EE				out	dx, al		; Write the color out
+
+ 0918  BA 03C9				mov	dx, 3c9h	; Color selection port
+
+ 091B  8A C4				mov	al, ah		; Red
+ 091D  EE				out	dx, al
+ 091E  8A C1				mov	al, cl		; Green
+ 0920  EE				out	dx, al
+ 0921  8A C5				mov	al, ch		; Blue
+ 0923  EE				out	dx, al
+
+ 0924  5A				pop	dx
+ 0925  58				pop	ax
+ 0926  C3				ret
+ 0927				SetPalleteColor ENDP
+
+				; -------------------------
+				;|		           |
+				;|      Draw Pixel	   |
+				;|			   |
+				; -------------------------
+				;; BX - Color Index
+				;; CX - X
+				;; DX - Y
+ 0927				DrawPixel PROC
+				;; Screen resolution is 320x200
+
+ 0927  50				push	ax
+ 0928  52				push	dx
+ 0929  57				push	di
+ 092A  06				push	es
+
+ 092B  B8 0140				mov	ax, 320
+ 092E  F7 E2				mul	dx		; AX = 320 * Y
+ 0930  03 C1				add	ax, cx		; AX = 320 * Y + X
+
+ 0932  8B F8				mov	di, ax		; Set di to the offset
+
+ 0934  68 A000				push	0A000h		; Set ES to the video segment
+ 0937  07				pop	es
+
+ 0938  26: 88 1D			mov	BYTE PTR es:[di], bl ; Set the pixel to the given color
+
+ 093B  07				pop	es
+ 093C  5F				pop	di
+ 093D  5A				pop	dx
+ 093E  58				pop	ax
+ 093F  C3				ret
+ 0940				DrawPixel ENDP
+
+ 0940				DrawQuad PROC
+ 0940  53				push	bx
+ 0941  51				push	cx
+ 0942  52				push	dx
+
+ 0943  BB 0001				mov	bx, 1
+ 0946  E8 FFDE				call	DrawPixel
+ 0949  41				inc	cx
+ 094A  E8 FFDA				call	DrawPixel
+ 094D  42				inc	dx	
+ 094E  E8 FFD6				call	DrawPixel
+ 0951  49				dec	cx
+ 0952  E8 FFD2				call	DrawPixel
+					
+ 0955  5A				pop	dx
+ 0956  59				pop	cx
+ 0957  5B				pop	bx
+ 0958  C3				ret
+ 0959				DrawQuad ENDP
+
+ 0959				DrawLine PROC
+ 0959  50				push	ax
+ 095A  53				push	bx
+ 095B  51				push	cx
+ 095C  52				push	dx
+ 095D  9C				pushf
+
+ 095E  EB 0A				jmp	cond
+ 0960				top:
+ 0960  BB 0001				mov	bx, 1
+ 0963  E8 FFDA				call	DrawQuad
+ 0966  83 C1 02				add	cx, 2
+ 0969  48				dec	ax
+ 096A				cond:
+ 096A  83 F8 00				cmp	ax, 0
+ 096D  77 F1				ja	top
+
+ 096F  9D				popf
+ 0970  5A				pop	dx
+ 0971  59				pop	cx
+ 0972  5B				pop	bx
+ 0973  58				pop	ax
+ 0974  C3				ret
+ 0975				DrawLine ENDP
+
+ 0975				DrawNextLine PROC
+ 0975  50				push	ax
+ 0976  53				push	bx
+ 0977  51				push	cx
+ 0978  52				push	dx
+ 0979  56				push	si
+ 097A  9C				pushf
+
+ 097B  81 3E 00BD R 0495 R		cmp	CurrentPixelOffset, OFFSET EndPixels
+ 0981  74 17				jz	done
+ 0983  8B 36 00BD R			mov	si, CurrentPixelOffset
+ 0987  BB 0001				mov	bx, 1
+ 098A  8B 04				mov	ax, [si]
+ 098C  8B 4C 02				mov	cx, [si + 2]
+ 098F  8B 54 04				mov	dx, [si + 4]
+ 0992  E8 FFC4				call	DrawLine
+ 0995  83 06 00BD R 06			add	CurrentPixelOffset, 6
+
+ 099A				done:
+ 099A  9D				popf
+ 099B  5E				pop	si
+ 099C  5A				pop	dx
+ 099D  59				pop	cx
+ 099E  5B				pop	bx
+ 099F  58				pop	ax
+ 09A0  C3				ret
+ 09A1				DrawNextLine ENDP
+				;-----------------------------------------------------
+				;\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+				;-----------------------------------------------------
+
+ 09A1				main PROC
+ 09A1  B8 ---- R			mov	ax, @data
+ 09A4  8E D8				mov	ds, ax
+
+ 09A6  E8 FF33				call	ReadCharacter
+ 09A9  E8 FDDE				call	PlaySong
+
+ 09AC  B8 4C00				mov	ax, DOS_EXIT
+ 09AF  CD 21				int	DOS
+ 09B1  C3				ret
+ 09B2				main ENDP
+				END main
+Microsoft (R) Macro Assembler Version 6.11		    11/12/18 02:54:19
+music.asm						     Symbols 2 - 1
+
+
+
+
+Segments and Groups:
+
+                N a m e                 Size     Length   Align   Combine Class
+
+DGROUP . . . . . . . . . . . . .	GROUP
+_DATA  . . . . . . . . . . . . .	16 Bit	 0614	  Word	  Public  'DATA'	
+STACK  . . . . . . . . . . . . .	16 Bit	 0200	  Para	  Stack	  'STACK'	 
+_TEXT  . . . . . . . . . . . . .	16 Bit	 09B2	  Word	  Public  'CODE'	
+
+
+Procedures,  parameters and locals:
+
+                N a m e                 Type     Value    Attr
+
+BootstrapNotes . . . . . . . . .	P Near	 0167	  _TEXT	Length= 0044 Public STDCALL
+CleanUpFileName  . . . . . . . .	P Near	 0045	  _TEXT	Length= 003F Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 0058	  _TEXT	
+  use  . . . . . . . . . . . . .	L Near	 0064	  _TEXT	
+  omit . . . . . . . . . . . . .	L Near	 006C	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 0071	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0078	  _TEXT	
+  bottom . . . . . . . . . . . .	L Near	 007C	  _TEXT	
+CloseFile  . . . . . . . . . . .	P Near	 00A8	  _TEXT	Length= 0010 Public STDCALL
+CopyBuffer . . . . . . . . . . .	P Near	 0715	  _TEXT	Length= 0019 Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 071C	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 0723	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0728	  _TEXT	
+Delay  . . . . . . . . . . . . .	P Near	 0124	  _TEXT	Length= 0015 Public STDCALL
+DrawLine . . . . . . . . . . . .	P Near	 0959	  _TEXT	Length= 001C Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 0960	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 096A	  _TEXT	
+DrawNextLine . . . . . . . . . .	P Near	 0975	  _TEXT	Length= 002C Public STDCALL
+  done . . . . . . . . . . . . .	L Near	 099A	  _TEXT	
+DrawPixel  . . . . . . . . . . .	P Near	 0927	  _TEXT	Length= 0019 Public STDCALL
+DrawQuad . . . . . . . . . . . .	P Near	 0940	  _TEXT	Length= 0019 Public STDCALL
+DumpLongRegs . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+DumpMem  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+DumpRegs . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+GetCmdTail . . . . . . . . . . .	P Near	 0000	  _TEXT	Length= 0045 Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 0024	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 002C	  _TEXT	
+  tooLargeError  . . . . . . . .	L Near	 003A	  _TEXT	
+GetVideoMode . . . . . . . . . .	P Near	 08E5	  _TEXT	Length= 000D Public STDCALL
+MuteSpeaker  . . . . . . . . . .	P Near	 00E6	  _TEXT	Length= 0008 Public STDCALL
+NewLine  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+OpenFile . . . . . . . . . . . .	P Near	 0084	  _TEXT	Length= 0024 Public STDCALL
+  filenotfound . . . . . . . . .	L Near	 009B	  _TEXT	
+PlayCount  . . . . . . . . . . .	P Near	 0113	  _TEXT	Length= 0011 Public STDCALL
+PlayNote . . . . . . . . . . . .	P Near	 04C9	  _TEXT	Length= 024F Public STDCALL
+  check_a  . . . . . . . . . . .	L Near	 04E9	  _TEXT	
+  check_ab . . . . . . . . . . .	L Near	 0506	  _TEXT	
+  check_b  . . . . . . . . . . .	L Near	 051E	  _TEXT	
+  check_bb . . . . . . . . . . .	L Near	 053E	  _TEXT	
+  check_c  . . . . . . . . . . .	L Near	 0556	  _TEXT	
+  check_cb . . . . . . . . . . .	L Near	 0573	  _TEXT	
+  check_d  . . . . . . . . . . .	L Near	 058B	  _TEXT	
+  check_db . . . . . . . . . . .	L Near	 05A8	  _TEXT	
+  check_e  . . . . . . . . . . .	L Near	 05C0	  _TEXT	
+  check_eb . . . . . . . . . . .	L Near	 05DA	  _TEXT	
+  check_f  . . . . . . . . . . .	L Near	 05ED	  _TEXT	
+  check_fb . . . . . . . . . . .	L Near	 0607	  _TEXT	
+  check_g  . . . . . . . . . . .	L Near	 061A	  _TEXT	
+  check_gb . . . . . . . . . . .	L Near	 0634	  _TEXT	
+  check_rest . . . . . . . . . .	L Near	 0647	  _TEXT	
+  check_sharp  . . . . . . . . .	L Near	 0652	  _TEXT	
+  check_flat . . . . . . . . . .	L Near	 065C	  _TEXT	
+  check_length . . . . . . . . .	L Near	 0666	  _TEXT	
+  check_sixteenth  . . . . . . .	L Near	 067C	  _TEXT	
+  check_eighth . . . . . . . . .	L Near	 0691	  _TEXT	
+  check_quarter  . . . . . . . .	L Near	 06A6	  _TEXT	
+  check_half . . . . . . . . . .	L Near	 06BB	  _TEXT	
+  check_whole  . . . . . . . . .	L Near	 06D0	  _TEXT	
+  play . . . . . . . . . . . . .	L Near	 06E3	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 06F5	  _TEXT	
+  note_error . . . . . . . . . .	L Near	 06FF	  _TEXT	
+  length_error . . . . . . . . .	L Near	 070A	  _TEXT	
+PlaySong . . . . . . . . . . . .	P Near	 078A	  _TEXT	Length= 0152 Public STDCALL
+  get_bpm  . . . . . . . . . . .	L Near	 07C1	  _TEXT	
+  get_to_time  . . . . . . . . .	L Near	 07F2	  _TEXT	
+  get_time . . . . . . . . . . .	L Near	 0803	  _TEXT	
+  get_to_key . . . . . . . . . .	L Near	 0846	  _TEXT	
+  get_key  . . . . . . . . . . .	L Near	 0857	  _TEXT	
+  skip_two_to_setup  . . . . . .	L Near	 0892	  _TEXT	
+  skip_one_to_setup  . . . . . .	L Near	 08A1	  _TEXT	
+  setup  . . . . . . . . . . . .	L Near	 08B0	  _TEXT	
+  play_notes . . . . . . . . . .	L Near	 08BD	  _TEXT	
+  cond . . . . . . . . . . . . .	L Near	 08C0	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 08CF	  _TEXT	
+PrintVersion . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ProcessLine  . . . . . . . . . .	P Near	 072E	  _TEXT	Length= 005C Public STDCALL
+  get_note . . . . . . . . . . .	L Near	 0734	  _TEXT	
+  get_accidental . . . . . . . .	L Near	 073A	  _TEXT	
+  check_sharp  . . . . . . . . .	L Near	 0747	  _TEXT	
+  check_flat . . . . . . . . . .	L Near	 0753	  _TEXT	
+  get_octave . . . . . . . . . .	L Near	 075D	  _TEXT	
+  get_length . . . . . . . . . .	L Near	 076A	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0770	  _TEXT	
+  format_error . . . . . . . . .	L Near	 0774	  _TEXT	
+  octave_error . . . . . . . . .	L Near	 077F	  _TEXT	
+ReadCharacter  . . . . . . . . .	P Near	 08DC	  _TEXT	Length= 0009 Public STDCALL
+ReadChar . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadHexByte  . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadHexDigit . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadHexWord  . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadInt  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadLine . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+ReadNextLine . . . . . . . . . .	P Near	 00B8	  _TEXT	Length= 002E Public STDCALL
+  top  . . . . . . . . . . . . .	L Near	 00C0	  _TEXT	
+ReadPixel  . . . . . . . . . . .	P Near	 08F9	  _TEXT	Length= 0007 Public STDCALL
+SetKeyNumber . . . . . . . . . .	P Near	 021D	  _TEXT	Length= 0326 Public STDCALL
+  sharps . . . . . . . . . . . .	L Near	 023A	  _TEXT	
+  check_C  . . . . . . . . . . .	L Near	 023A	  _TEXT	
+  check_am . . . . . . . . . . .	L Near	 0252	  _TEXT	
+  check_G  . . . . . . . . . . .	L Near	 026A	  _TEXT	
+  check_em . . . . . . . . . . .	L Near	 0279	  _TEXT	
+  check_D  . . . . . . . . . . .	L Near	 0288	  _TEXT	
+  check_bm . . . . . . . . . . .	L Near	 0297	  _TEXT	
+  check_A  . . . . . . . . . . .	L Near	 02A6	  _TEXT	
+  check_fsm  . . . . . . . . . .	L Near	 02B5	  _TEXT	
+  check_E  . . . . . . . . . . .	L Near	 02CB	  _TEXT	
+  check_csm  . . . . . . . . . .	L Near	 02DA	  _TEXT	
+  check_B  . . . . . . . . . . .	L Near	 02F0	  _TEXT	
+  check_gsm  . . . . . . . . . .	L Near	 02FF	  _TEXT	
+  check_Fs . . . . . . . . . . .	L Near	 0315	  _TEXT	
+  check_dsm  . . . . . . . . . .	L Near	 032B	  _TEXT	
+  check_Cs . . . . . . . . . . .	L Near	 0341	  _TEXT	
+  check_asm  . . . . . . . . . .	L Near	 0357	  _TEXT	
+  flats  . . . . . . . . . . . .	L Near	 0371	  _TEXT	
+  check_C2 . . . . . . . . . . .	L Near	 0371	  _TEXT	
+  check_am2  . . . . . . . . . .	L Near	 0389	  _TEXT	
+  check_F  . . . . . . . . . . .	L Near	 03A1	  _TEXT	
+  check_dm . . . . . . . . . . .	L Near	 03B0	  _TEXT	
+  check_Bf . . . . . . . . . . .	L Near	 03BF	  _TEXT	
+  check_gm . . . . . . . . . . .	L Near	 03D5	  _TEXT	
+  check_Ef . . . . . . . . . . .	L Near	 03E4	  _TEXT	
+  check_cm . . . . . . . . . . .	L Near	 03FA	  _TEXT	
+  check_Af . . . . . . . . . . .	L Near	 0409	  _TEXT	
+  check_fm . . . . . . . . . . .	L Near	 041F	  _TEXT	
+  check_Df . . . . . . . . . . .	L Near	 042E	  _TEXT	
+  check_bfm  . . . . . . . . . .	L Near	 0443	  _TEXT	
+  check_Gf . . . . . . . . . . .	L Near	 0458	  _TEXT	
+  check_cfm  . . . . . . . . . .	L Near	 046D	  _TEXT	
+  check_Cf . . . . . . . . . . .	L Near	 0482	  _TEXT	
+  check_afm  . . . . . . . . . .	L Near	 0497	  _TEXT	
+  none . . . . . . . . . . . . .	L Near	 04AC	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 04B1	  _TEXT	
+  accidental_error . . . . . . .	L Near	 04B3	  _TEXT	
+  note_error . . . . . . . . . .	L Near	 04BE	  _TEXT	
+SetNoteLengths . . . . . . . . .	P Near	 01AB	  _TEXT	Length= 0072 Public STDCALL
+  half . . . . . . . . . . . . .	L Near	 01C8	  _TEXT	
+  quarter  . . . . . . . . . . .	L Near	 01DD	  _TEXT	
+  eighth . . . . . . . . . . . .	L Near	 01F2	  _TEXT	
+  sixteenth  . . . . . . . . . .	L Near	 0206	  _TEXT	
+  done . . . . . . . . . . . . .	L Near	 0215	  _TEXT	
+SetPalette . . . . . . . . . . .	P Near	 0907	  _TEXT	Length= 000B Public STDCALL
+SetPalleteColor  . . . . . . . .	P Near	 0912	  _TEXT	Length= 0015 Public STDCALL
+SetVideoMode . . . . . . . . . .	P Near	 08F2	  _TEXT	Length= 0007 Public STDCALL
+SkipToEOL  . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+SpeakerOff . . . . . . . . . . .	P Near	 0108	  _TEXT	Length= 000B Public STDCALL
+SpeakerOn  . . . . . . . . . . .	P Near	 00F6	  _TEXT	Length= 0012 Public STDCALL
+  done . . . . . . . . . . . . .	L Near	 0105	  _TEXT	
+StoreBeatInfo  . . . . . . . . .	P Near	 0139	  _TEXT	Length= 002E Public STDCALL
+TraceRegisterChanges . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+UnmuteSpeaker  . . . . . . . . .	P Near	 00EE	  _TEXT	Length= 0008 Public STDCALL
+Version  . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteBit . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteChar  . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexByte . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexDigit  . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexLong . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteHexWord . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteInt . . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WritePixel . . . . . . . . . . .	P Near	 0900	  _TEXT	Length= 0007 Public STDCALL
+WriteString  . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+WriteUInt  . . . . . . . . . . .	P Near	 0000	  Length= 0000 External STDCALL
+main . . . . . . . . . . . . . .	P Near	 09A1	  _TEXT	Length= 0011 Public STDCALL
+
+
+Symbols:
+
+                N a m e                 Type     Value    Attr
+
+@CodeSize  . . . . . . . . . . .	Number	 0000h	 
+@DataSize  . . . . . . . . . . .	Number	 0000h	 
+@Interface . . . . . . . . . . .	Number	 0003h	 
+@Model . . . . . . . . . . . . .	Number	 0002h	 
+@code  . . . . . . . . . . . . .	Text   	 _TEXT
+@data  . . . . . . . . . . . . .	Text   	 DGROUP
+@fardata?  . . . . . . . . . . .	Text   	 FAR_BSS
+@fardata . . . . . . . . . . . .	Text   	 FAR_DATA
+@stack . . . . . . . . . . . . .	Text   	 DGROUP
+BIOS . . . . . . . . . . . . . .	Number	 0010h	 
+BPM  . . . . . . . . . . . . . .	Word	 0088	  _DATA	
+BeatLength . . . . . . . . . . .	DWord	 008A	  _DATA	
+CARRIAGERET  . . . . . . . . . .	Number	 000Dh	 
+CLOSEF . . . . . . . . . . . . .	Number	 3E00h	 
+CMDTAIL  . . . . . . . . . . . .	Number	 0080h	 
+CurrentAccidental  . . . . . . .	Byte	 00A8	  _DATA	
+CurrentLength  . . . . . . . . .	Byte	 00A9	  _DATA	
+CurrentLine  . . . . . . . . . .	Byte	 00AE	  _DATA	
+CurrentNote  . . . . . . . . . .	Byte	 00A7	  _DATA	
+CurrentOctave  . . . . . . . . .	Byte	 00A6	  _DATA	
+CurrentPixelOffset . . . . . . .	Word	 00BD	  _DATA	
+CurrentPixel . . . . . . . . . .	Word	 016F	  _DATA	
+DOS_EXIT . . . . . . . . . . . .	Number	 4C00h	 
+DOS  . . . . . . . . . . . . . .	Number	 0021h	 
+EighthNoteLength . . . . . . . .	DWord	 009A	  _DATA	
+EndPixels  . . . . . . . . . . .	Word	 0495	  _DATA	
+FREQUENCY  . . . . . . . . . . .	Number	 001234DCh   
+FileHandle . . . . . . . . . . .	Word	 007F	  _DATA	
+FileName . . . . . . . . . . . .	Byte	 0000	  _DATA	
+FormatErrorMsg . . . . . . . . .	Byte	 05D3	  _DATA	
+HalfNoteLength . . . . . . . . .	DWord	 0092	  _DATA	
+KeyAccidentalErrorMsg  . . . . .	Byte	 0534	  _DATA	
+KeyNoteErrorMsg  . . . . . . . .	Byte	 0563	  _DATA	
+KeySigAccidental . . . . . . . .	Byte	 00AC	  _DATA	
+KeySigNote . . . . . . . . . . .	Byte	 00AA	  _DATA	
+KeySigNumber . . . . . . . . . .	Byte	 00AD	  _DATA	
+LengthErrorMsg . . . . . . . . .	Byte	 05AC	  _DATA	
+Muted  . . . . . . . . . . . . .	Byte	 0081	  _DATA	
+Note1  . . . . . . . . . . . . .	Byte	 00AE	  _DATA	
+Note2  . . . . . . . . . . . . .	Byte	 00B3	  _DATA	
+Note3  . . . . . . . . . . . . .	Byte	 00B8	  _DATA	
+NoteErrorMsg . . . . . . . . . .	Byte	 058C	  _DATA	
+ONE_MINUTE . . . . . . . . . . .	Number	 03938700h   
+ONE_SECOND . . . . . . . . . . .	Number	 000F4240h   
+OPENF  . . . . . . . . . . . . .	Number	 3D00h	 
+Octave1  . . . . . . . . . . . .	Word	 00BF	  _DATA	
+Octave2  . . . . . . . . . . . .	Word	 00D7	  _DATA	
+Octave3  . . . . . . . . . . . .	Word	 00EF	  _DATA	
+Octave4  . . . . . . . . . . . .	Word	 0107	  _DATA	
+Octave5  . . . . . . . . . . . .	Word	 011F	  _DATA	
+Octave6  . . . . . . . . . . . .	Word	 0137	  _DATA	
+Octave7  . . . . . . . . . . . .	Word	 014F	  _DATA	
+Octave8  . . . . . . . . . . . .	Word	 0167	  _DATA	
+OctaveErrorMsg . . . . . . . . .	Byte	 05F2	  _DATA	
+PRINTCHR . . . . . . . . . . . .	Number	 0002h	 
+PSPPOINTER . . . . . . . . . . .	Number	 6200h	 
+Pixels . . . . . . . . . . . . .	Word	 0171	  _DATA	
+QuarterNoteLength  . . . . . . .	DWord	 0096	  _DATA	
+READF  . . . . . . . . . . . . .	Number	 3F00h	 
+READY_TIMER  . . . . . . . . . .	Number	 00B6h	 
+READ_CHAR  . . . . . . . . . . .	Number	 0001h	 
+SPEAKER_PORT . . . . . . . . . .	Number	 0061h	 
+SixteenthNoteLength  . . . . . .	DWord	 009E	  _DATA	
+TIMER_CONTROL_PORT . . . . . . .	Number	 0043h	 
+TIMER_DATA_PORT  . . . . . . . .	Number	 0042h	 
+TIMER_WAIT . . . . . . . . . . .	Number	 0086h	 
+TIMER  . . . . . . . . . . . . .	Number	 0015h	 
+ThirtysecondNoteLength . . . . .	DWord	 00A2	  _DATA	
+TimeSignature  . . . . . . . . .	Byte	 0086	  _DATA	
+TrashBuffer  . . . . . . . . . .	Byte	 00AE	  _DATA	
+WaitBot  . . . . . . . . . . . .	Word	 0084	  _DATA	
+WaitInterval . . . . . . . . . .	DWord	 0082	  _DATA	
+WaitTop  . . . . . . . . . . . .	Word	 0082	  _DATA	
+WholeNoteLength  . . . . . . . .	DWord	 008E	  _DATA	
+noFileMsg  . . . . . . . . . . .	Byte	 0524	  _DATA	
+tooLargeMsg  . . . . . . . . . .	Byte	 04FD	  _DATA	
+
+	   0 Warnings
+	   0 Errors

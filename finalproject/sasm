@@ -1,0 +1,992 @@
+#!/usr/bin/python2
+import re
+import sys
+
+REGISTERS = ["a", "x", "l", "b", "s", "t", "f", "fmore", "pc", "sw"]
+
+HEX_ONLY = re.compile('^(\+|\-)?([0-9]|[A-F]|[a-f])+$')
+DEC_ONLY = re.compile('^(\+|\-)?[0-9]*$')
+REG_ONLY = re.compile('^(a|x|l|pc|sw|b|s|t|f)$')
+LBL_ONLY= re.compile('^[A-z]([A-z]|[0-9]|_)*$')
+BIN_ONLY = re.compile('^(0|1)*$')
+    
+MAX_MEMORY = 1048576
+WORD_MIN = -(2**24)
+WORD_MAX = 2**24
+
+
+# ---------------------------------------------
+#|                                            | 
+#|             Mnemonic Dictionary            |
+#|                                            |
+# ---------------------------------------------
+
+class Mnemonic(object):
+    def __init__(self, format, opcode,  notes):
+        self.format = format
+        self.opcode = opcode
+        self.notes = notes
+
+OP_DICT = {
+    "add" : Mnemonic([3, 4], 0x18, [0, 0, 0, 0]),
+    "addf" : Mnemonic([3, 4], 0x58, [0, 1, 1, 0]),
+    "addr" : Mnemonic([2], 0x90, [0, 0, 0, 0]),
+    "and" : Mnemonic([3, 4], 0x40, [0, 0, 0, 0]),
+    "clear" : Mnemonic([2, 3], 0xB4, [0, 1, 0, 0]),
+    "comp" : Mnemonic([3, 4], 0x28, [0, 0, 0, 1]),
+    "compf" : Mnemonic([3, 4], 0x88, [0, 1, 1, 1]),
+    "compr" : Mnemonic([2], 0xA0, [0, 1, 0, 1]),
+    "div" : Mnemonic([3, 4], 0x24, [0, 0, 0, 0]),
+    "divf" : Mnemonic([3, 4], 0x64, [0, 1, 1, 0]),
+    "divr" : Mnemonic([2], 0x9C, [0, 1, 0, 0]),
+    "fix" : Mnemonic([1], 0xC4, [0, 1, 1, 0]),
+    "float" : Mnemonic([1], 0xC0, [0, 1, 1, 0]),
+    "hio" : Mnemonic([1], 0xF4, [1, 1, 0, 0]),
+    "j" : Mnemonic([3, 4], 0x3C, [0, 0, 0, 0]),
+    "jeq" : Mnemonic([3, 4], 0x30, [0, 0, 0, 0]),
+    "jgt" : Mnemonic([3, 4], 0x34, [0, 0, 0, 0]),
+    "jlt" : Mnemonic([3, 4], 0x38, [0, 0, 0, 0]),
+    "jsub" : Mnemonic([3, 4], 0x48, [0, 0, 0, 0]),
+    "lda" : Mnemonic([3, 4], 0x00, [0, 0, 0, 0]),
+    "ldb" : Mnemonic([3, 4], 0x68, [0, 1, 0, 0]),
+    "ldch" : Mnemonic([3, 4], 0x50, [0, 0, 0, 0]),
+    "ldf" : Mnemonic([3, 4], 0x70, [0, 1, 1, 0]),
+    "ldl" : Mnemonic([3, 4], 0x08, [0, 0, 0, 0]),
+    "lds" : Mnemonic([3, 4], 0x6C, [0, 1, 0, 0]),
+    "ldt" : Mnemonic([3, 4], 0x74, [0, 1, 0, 0]),
+    "ldx" : Mnemonic([3, 4], 0x04, [0, 0, 0, 0]),
+    "lps" : Mnemonic([3, 4], 0xD0, [1, 1, 0, 0]),
+    "mul" : Mnemonic([3, 4], 0x20, [0, 0, 0, 0]),
+    "mulf" : Mnemonic([3, 4], 0x60, [0, 1, 1, 0]),
+    "mulr" : Mnemonic([2], 0x98, [0, 1, 0, 0]),
+    "norm" : Mnemonic([1], 0xC8, [0, 1, 1, 0]),
+    "or" : Mnemonic([3, 4], 0x44, [0, 0, 0, 0]),
+    "rd" : Mnemonic([3, 4], 0xD8, [1, 0, 0, 0]),
+    "rmo" : Mnemonic([2], 0xAC, [0, 1, 0, 0]),
+    "rsub" : Mnemonic([1, 3, 4], 0x4C, [0, 0, 0, 0]),
+    "shiftl" : Mnemonic([2], 0xA4, [0, 0, 0, 0]),
+    "shiftr" : Mnemonic([2], 0xA8, [0, 1, 0, 0]),
+    "sio" : Mnemonic([1], 0xF0, [1, 1, 0, 0]),
+    "ssk" : Mnemonic([3, 4], 0xEC, [1, 1, 0, 0]),
+    "sta" : Mnemonic([3, 4], 0x0C, [0, 0, 0, 0]),
+    "stb" : Mnemonic([3, 4], 0x78, [0, 1, 0, 0]),
+    "stch" : Mnemonic([3, 4], 0x54, [0, 0, 0, 0]),
+    "stf" : Mnemonic([3, 4], 0x80, [0, 1, 1, 0]),
+    "sti" : Mnemonic([3, 4], 0xD4, [1, 1, 0, 0]),
+    "stl" : Mnemonic([3, 4], 0x14, [0, 0, 0, 0]),
+    "sts" : Mnemonic([3, 4], 0x7C, [0, 1, 0, 0]),
+    "stsw" : Mnemonic([3, 4], 0xE8, [0, 1, 0, 0]),
+    "stt" : Mnemonic([3, 4], 0x84, [0, 1, 0, 0]),
+    "stx" : Mnemonic([3, 4], 0x10, [0, 0, 0, 0]),
+    "sub" : Mnemonic([3, 4], 0x1C, [0, 0, 0, 0]),
+    "subf" : Mnemonic([3, 4], 0x5C, [0, 1, 1, 0]),
+    "subr" : Mnemonic([2], 0x94, [0, 1, 0, 0]),
+    "svc" : Mnemonic([2, 3], 0xB0, [0, 1, 0, 0]),
+    "td" : Mnemonic([3, 4], 0xE0, [1, 0, 0, 1]),
+    "tio" : Mnemonic([1], 0xF8, [1, 1, 0, 1]),
+    "tix" : Mnemonic([3, 4], 0x2C, [0, 0, 0, 1]),
+    "tixr" : Mnemonic([2, 3], 0xB8, [0, 1, 0, 1]),
+    "wd" : Mnemonic([3, 4], 0xDC, [0, 0, 0, 0])
+}
+
+# ---------------------------------------------
+#|                                                    | 
+#|            Read + Trim Line             |
+#|                                                    |
+# ---------------------------------------------
+
+def readInLine(file):
+    current_line = file.readline()
+    return trimLine(current_line)
+
+def trimLine(line):
+    """Takes a string and returns the first 40 columns of that string."""
+    col = 0
+    index = 0
+    line_len = len(line)
+
+    while(col < 40 and index < line_len):
+        current_char = line[index]
+        index += 1
+        if(current_char != '\t'):
+            col += 1
+        else:
+            col += (8 - (col % 8))
+
+    return line[:index]
+
+def getNextRealLine(file, line_num, current_adr, started):
+    """Takes a file and a line_num, returns (line, line_num, parsed)"""
+    new_lbl = None
+    #Read in a line
+    line = readInLine(file)
+    if(line == ""):
+        return (line, line_num, 0, new_lbl)
+    line_num += 1
+    parsed = refineMatched(line, line_num, processLine(line.lower()))
+    if(parsed ==  1):
+        return (line, line_num, parsed, new_lbl)
+    #Keep reading in lines until one of them is not format 0
+    while(line != "" and parsed["format"] == 0):
+        if(parsed["label"] != None):
+            if(started == False):
+                print(str(line_num) + ":Cannot have label before 'start': \'" + parsed["label"] + ":\'\n" + line)
+                return (line, line_num, 1, new_lbl)
+            else:
+                if(new_lbl != None):
+                    new_lbl.update({parsed["label"] : current_adr})
+                else:
+                    new_lbl = {parsed["label"] : current_adr}
+        line = readInLine(file)
+        line_num += 1
+        parsed = refineMatched(line, line_num, processLine(line.lower()))
+        if(parsed ==  1):
+            return (line, line_num, parsed, new_lbl)
+    if(line == ""):
+        return (line, line_num, 0)
+    return (line.rstrip(), line_num, parsed, new_lbl)
+
+# ---------------------------------------------
+#|                                                    | 
+#|              Process Line                   |
+#|                                                    |
+# ---------------------------------------------
+
+def processLine(line):
+    """Using the power of regular expressions, returns a list of possible formats the line could be in. (Usually* containing only one format dictionary.)"""
+    #NOTE: The most common time when two format dictionaries are returned occurs when the second operand of the line is "x". This registers as both formats 2 and 3.
+    #Create regular expressions to recognize formats
+    #    label = re.compile('^(((?P<label>[A-z]([A-z]|[0-9]|_)*):)(\s)*)|(\.(\.|\n|\s)*)$')
+    label = re.compile('^((((?P<label>[A-z]([A-z]|[0-9]|_)*):)(\s)*)$)|(^(\s)*\.(\s|\S)*$)|(^(\s)*$)')
+    format1 = re.compile('^((?P<label>[A-z]([A-z]|[0-9]|_)*):)?(\s)*(?P<opcode>([A-z]+)|(\+rsub))(\s)*$')
+    format2 = re.compile('^((?P<label>[A-z]([A-z]|[0-9]|_)*):)?(\s)*(?P<opcode>[A-z]+)(\s)+(?P<operand1>(a|x|l|pc|sw|b|s|t|f))(\s)*,(\s)*(?P<operand2>(a|x|l|pc|sw|b|s|t|f|((\+|\-)?([0-9]|[A-F]|[a-f])+)))(\s)*$')
+    format3 = re.compile('^((?P<label>[A-z]([A-z]|[0-9]|_)*):)?(\s)*(?P<opcode>[A-z]+)(\s)+((?P<indirect>@)?|(?P<immediate>#)?)(?P<operand>((\+|\-)?(\w+)|((x|c)\'(\S| |\t)*\')))(\s)*(,(\s)*(?P<extended>x)(\s)*)?$')
+    format4 = re.compile('^((?P<label>[A-z]([A-z]|[0-9]|_)*):)?(\s)*\+(?P<opcode>[A-z]+)(\s)+((?P<indirect>@)?|(?P<immediate>#)?)(?P<operand>(\+|\-)?(\w|\'|\")+)(\s)*(,(\s)*(?P<extended>x)(\s)*)?$')
+
+    lmatch = label.match(line)
+    f1match = format1.match(line)
+    f2match = format2.match(line)
+    f3match = format3.match(line)
+    f4match = format4.match(line)
+    allmatch = [lmatch, f1match, f2match, f3match, f4match]
+    matched = []
+    for i in range(len(allmatch)):
+        if(allmatch[i] != None):
+            temp = allmatch[i].groupdict(None)
+            temp.update({"format" : i})
+            matched.append(temp)
+
+    return sorted(matched)
+
+# ---------------------------------------------
+#|                                                    | 
+#|             refineMatched                 |
+#|                                                    |
+# ---------------------------------------------
+
+def refineMatched(line, line_num, matched_formats):
+    """Takes a dictionary of matched formats (from processLine) and narrows it down to one parsed dictionary."""
+    directives = {"byte" : [3],
+                  "resb" : [3],
+                  "word" : [3],
+                  "resw" : [3],
+                  "start" : [1, 3],
+                  "end" : [1, 3],
+                  "base" : [3],
+                  "nobase" : [1]  
+    }
+    mlen = len(matched_formats)
+
+    if(mlen == 0):
+        print(str(line_num) + ":Badly formed directive:\n" + line)
+        return 1
+    else:
+        for e in matched_formats:
+            # If it is a comment line or a line with only a label, return that one (This will never be confused for another format).
+            if(e["format"] == 0):
+                return e
+            # If it is a mnemonic, check the OP_DICT for the correct format to use.
+            elif((e["opcode"] in OP_DICT) and (e["format"] in OP_DICT[e["opcode"]].format)):
+                return e
+            elif((e["opcode"] in directives) and (e["format"] in directives[e["opcode"]])):
+                return e
+            elif(e["format"] == 1 and e["opcode"] == "+rsub"):
+                e["opcode"] = "rsub"
+                e["format"] = 4
+                e["indirect"] = e["immediate"] = e["operand"] = e["extended"] = None
+                return e
+            else:
+                print(str(line_num) + ":Unrecognized line:\n" + line)
+                return 1
+
+# ---------------------------------------------
+#|                                                    | 
+#|              String to ___                  |
+#|                                                    |
+# ---------------------------------------------
+
+def stringToHex(str):
+    """Takes a string as input and returns the hex value of the string."""
+    hex_val = 0
+    
+    #Convert the string to uppercase and interate through it. 
+    for c in str.upper(): 
+        char_val = ord(c)
+        hex_val *= 16
+        
+         # If we have an actual number, just add that number.
+        if char_val >= ord("0") and char_val <= ord("9"):
+            hex_val += char_val - ord("0")
+
+        #If we have a letter, add the corresponding value.
+        elif char_val >= ord("A") and char_val <= ord("F"):
+            # Add 10 because that is the value of 'A'
+            hex_val += char_val - ord("A") + 10
+
+        # If it is neither 0-9 nor A-F, it is not a hex character
+        else: 
+            print("Invalid format!")
+            return -1
+
+    return hex_val
+
+def stringToBinary(str):
+    """Takes a string as input and returns the binary value of the string."""
+    bin_val = 0
+    if(BIN_ONLY.match(str) == None):
+        print("stringToBinary - Cannot convert this string to binary! Does not contains 0s and 1s!")
+        return 1
+    for c in str:
+        bin_val *= 2
+        bin_val += int(c)
+    return bin_val
+    
+
+# ---------------------------------------------
+#|                                                    | 
+#|                 Pass One                     |
+#|                                                    |
+# ---------------------------------------------
+
+def processByte(line):
+    """Takes a string that is being stored as a byte and removes extra leading 0's, if necessary."""
+    new_line = line
+    
+    if(len(new_line) % 2 == 1):
+        new_line = "0" + line
+
+    return new_line
+
+#TODO: If the second register is a number but the opcode isn't shift, we should throw an error.
+def pass1(filename):
+    f = open(filename)
+    start_adr = 0 
+    current_adr = 0
+    current_line = ""
+    current_line_num = 0
+    parsed = {}
+    empty = True
+    program_offsets = {}
+    started = False
+    
+    (current_line, current_line_num, parsed, new_lbl) = getNextRealLine(f, current_line_num, current_adr, started)
+    if (parsed == 1 or parsed ==0):
+        # Cechk for empty file
+        if(current_line == ""):
+            print("Error: cannot assemble empty file.")
+            return(1, empty, {}, 0)
+        return (parsed, empty, program_offsets, current_adr - start_adr)
+    if(new_lbl != None):
+        program_offsets.update(new_lbl)
+    
+
+    started = True
+    # Process first line with material in file. Initialize start/current address.
+    if(parsed["opcode"] == "start"):
+        if("operand" in parsed):
+            if(HEX_ONLY.match(parsed["operand"]) != None):
+                if(stringToHex(parsed["operand"]) < MAX_MEMORY):
+                    start_adr = stringToHex(parsed["operand"])
+                else:
+                    print(str(current_line_num) + ":Start address exceeds SIC/XE memory capacity:\n" + current_line.rstrip())
+                    return (1, empty, program_offsets, current_adr - start_adr)
+                current_adr = start_adr
+            else:
+                print(str(current_line_num) + ":Error: operand must consist of hex digits only:\n" + current_line.rstrip())
+                return (1, empty, program_offsets, current_adr - start_adr)
+        else:
+            current_adr  = 0
+        if(parsed["label"] != None):
+            program_offsets[parsed["label"]] = current_adr            
+        (current_line, current_line_num, parsed, new_lbl) = getNextRealLine(f, current_line_num, current_adr, started)
+        if(parsed == 1 or parsed == 0):
+            if(current_line == ""):
+                print("Error: cannot assemble file containing only the start directive.")
+                return(1, empty, {}, 0)
+            return (parsed, empty, program_offsets, current_adr - start_adr)
+        if(new_lbl != None):
+            program_offsets.update(new_lbl)
+    else:
+        current_adr = 0
+
+    while(current_line != "" and parsed["opcode"] != "end"):
+        # If this is not a comment line (this should be unnecessary if my code above works (lol)):
+        if(current_line[0] != '.'):
+            empty = False
+            # If there is a symbol in the label field:
+            if(parsed["label"] != None):
+                # Search program_offsets for "label".
+                # If found:
+                if parsed["label"] in program_offsets:
+                    # Set error flag (duplicate symbol)
+                    print(str(current_line_num) + ":Previously defined symbol:" +
+                          parsed["label"] + ":\n" + current_line)
+                    return (1, empty, program_offsets, current_adr - start_adr)
+                # Otherwise, insert (LABEL, LOCCTR) into program_offsets
+                else:
+                    program_offsets[parsed["label"]] = current_adr
+            # Search OP_DICT for "opcode"
+            # If found:
+            if parsed["opcode"] in OP_DICT:
+                opc = parsed["opcode"]
+                if opc in ["clear", "svc", "tixr"]:
+                    current_adr += 2
+                    if(opc == "clear" and REG_ONLY.match(parsed["operand"]) == None):
+                        print(str(current_line_num) + ":Expected register:\n" + current_line)
+                        return (1,empty, program_offsets, current_adr - start_adr)
+                elif(opc == "rsub"):
+                    if(parsed["format"] == 1):
+                        current_adr += 3
+                    elif(parsed["format"] == 4):
+                        current_adr += 4
+                else:
+                    current_adr += parsed["format"]
+            elif(parsed["opcode"] == "word"):
+                if(DEC_ONLY.match(parsed["operand"]) == None):
+                    print(str(current_line_num) + ":Invalid operand (use a decimal):\n" + current_line)
+                    return (1,empty, program_offsets, current_adr - start_adr)
+                elif(int(parsed["operand"]) >= WORD_MIN and int(parsed["operand"]) < WORD_MAX):
+                    current_adr += 3
+                else:
+                    print(str(current_line_num) + ":Value exceeds storage capacity of word:\n" + current_line)
+                    return (1, empty, program_offsets, current_adr - start_adr)
+            elif(parsed["opcode"] == "resw"):
+                if not "operand" in parsed:
+                    print(str(current_line_num) + ":Badly formed directive:\n" + current_line)
+                    return (1, empty, program_offsets, current_adr - start_adr)
+                else:
+                    if(DEC_ONLY.match(parsed["operand"]) != None):
+                        current_adr += 3 * int(parsed["operand"])
+                    else:
+                        print(str(current_line_num) + ":'resw' must be followed by a value in decimal:\n" + current_line)
+                        return (1, empty, program_offsets, current_adr - start_adr)
+            elif(parsed["opcode"] == "resb"):
+                if not "operand" in parsed:
+                    print(str(current_line_num) + ":Badly formed directive:\n" + current_line)
+                    return (1, empty, program_offsets, current_adr - start_adr)
+                else:
+                    if(DEC_ONLY.match(parsed["operand"]) != None):
+                        current_adr += int(parsed["operand"])
+                    else:
+                        print(str(current_line_num) + ":'resb' must be followed by a value in decimal:\n" + current_line)
+                        return (1, empty, program_offsets, current_adr - start_adr)
+            elif(parsed["opcode"] == "byte"):
+                if "operand" in parsed:
+                    # If we are working with characters, each char is a byte so add len of operand
+                    if(parsed["operand"].split('\'')[0] == "c"):
+                        current_adr += len(parsed["operand"].split('\'')[1])
+                    # If we are working with the actual value, each digit is a nybble so div by 2
+                    elif(parsed["operand"].split('\'')[0] == "x"):
+                        current_adr += len(processByte(parsed["operand"].split('\'')[1])) / 2
+                    else:
+                        current_adr += 1
+                else:
+                    print(str(current_line_num) + ":Badly formed directive:\n" + current_line)
+                    return (1, empty, program_offsets, current_adr - start_adr)
+            # Otherwise, set the error flag (invalid operand code)
+            elif(parsed["opcode"] == "base" or parsed["opcode"] == "nobase"):
+                if(parsed["operand"] != None and LBL_ONLY.match(parsed["operand"]) == None and DEC_ONLY.match(parsed["operand"]) == None and HEX_ONLY.match(parsed["operand"]) == None):
+                    print(str(current_line_num) + ":Invalid operand. Please enter a value or a label:\n" + current_line)
+                    return (1, empty, program_offsets, current_adr - start_adr)
+            else:
+                print(str(current_line_num) + ":Expected mnemonic at '" +
+                      parsed["opcode"] + "':\n" + current_line)
+                return (1, empty, program_offsets, current_adr - start_adr)
+
+            # Make sure we haven't used up too much memory
+            if(current_adr > MAX_MEMORY):
+                print(str(current_line_num) + ":Instruction ends beyond maximum memory address for SIC/XE:\n" + current_line.rstrip())
+                return (1, empty, program_offsets, current_adr - start_adr)
+            # Read the next line
+            (current_line, current_line_num, parsed, new_lbl) = getNextRealLine(f, current_line_num, current_adr, started)
+            if (parsed == 1 or parsed ==0):
+                return (parsed, empty, program_offsets, current_adr - start_adr)
+            if(new_lbl != None):
+                program_offsets.update(new_lbl)
+
+   
+    if(parsed["label"] != None):
+        program_offsets[parsed["label"]] = current_adr
+
+    if(current_line != "" and parsed["opcode"] == "end"):
+        if("operand" not in parsed):
+            entry_point = 0
+        elif(LBL_ONLY.match(parsed["operand"]) == None and HEX_ONLY.match(parsed["operand"]) == None):
+            print(str(current_line_num) + ":Invalid operand. Please enter a value or a label:\n" + current_line)
+            return (1, empty, program_offsets, current_adr - start_adr)
+        elif(LBL_ONLY.match(parsed["operand"]) != None):
+            if(parsed["operand"] in program_offsets):
+                entry_point = program_offsets[parsed["operand"]]
+            else:
+                print(str(current_line_num) + ":Undeclared label: \'" + parsed["operand"] + ":\' :\n" + current_line)
+                return(1, empty, program_offsets, current_adr - start_adr)
+        else:
+            entry_point = stringToHex(parsed["operand"])
+    else:
+        entry_point = start_adr
+
+        
+    if empty:
+        print("Error: file must have a line of substance.")
+        return(1, empty, {}, 0)
+
+    f.close()
+    return (0, empty, program_offsets, current_adr - start_adr)
+
+# ---------------------------------------------
+# |                                                  | 
+# |                 Print Offsets             |
+# |                                                  |
+# ---------------------------------------------
+
+def printOffsets(program_offsets):
+    """Prints the program_offsets dict in order."""
+    temp_offsets = sorted(program_offsets)
+    
+    print("Symbols:")
+    for i in temp_offsets:
+        print("  " + i.upper() + ": " + "%06X"%program_offsets[i])
+    return
+
+# ---------------------------------------------
+# |                                                  | 
+# |               Write Record              |
+# |                                                  |
+# ---------------------------------------------
+
+def writeRecord(obj_file, record):
+    """Writes the bytes in the record to the passed file."""
+    f = obj_file
+    if(record[0] == 'H'):
+        for c in range(7):
+            f.write(record[c])
+        record = record[7:]
+        for i in range(len(record)/2):
+            temp_byte = record[:2]
+            record = record[2:]
+            f.write(chr(int(temp_byte, 16)))
+    elif(record[0] in ['T', 'E']):
+        f.write(record[0])
+        record = record[1:]
+        for i in range(len(record)/2):
+            temp_byte = record[:2]
+            record = record[2:]
+            f.write(chr(int(temp_byte, 16)))
+    
+    return
+# ---------------------------------------------
+# |                                                    | 
+# |                 Pass Two                    |
+# |                                                    |
+# ---------------------------------------------
+def pass2(filename, out_file, program_offsets, program_len):
+    """You already know what tf is going on!"""
+    base = 0
+    base_flag = False
+    f = open(filename)
+    out_file = open(out_file, "w")
+    current_line = ""
+    current_line_num = 0
+    start_adr = 0
+    current_adr = 0
+    parsed = {}
+    header_record = "H"
+    target_adr = 0
+    started = False
+    extra_adr = 0
+    initialized = False
+
+    text_buffer = ""
+    # Read in the first real line
+    (current_line, current_line_num, parsed, new_lbl) = getNextRealLine(f, current_line_num, current_adr, started)
+    temp_name = ""
+    # Get the starting address and filename, if they exist.
+    if(parsed["opcode"] == "start"):
+        started = True
+        if(parsed["label"] != None):
+            temp_name = current_line.split(':')[0].strip()
+        else:
+            temp_name = ""
+        if("operand" in parsed and HEX_ONLY.match(parsed["operand"]) != None):
+            if(stringToHex(parsed["operand"]) < MAX_MEMORY):
+                start_adr = stringToHex(parsed["operand"])
+        else:
+            start_adr = 0
+        current_adr = start_adr
+        
+        (current_line, current_line_num, parsed, new_lbl) = getNextRealLine(f, current_line_num, current_adr, started)
+
+    # Assemble the header record.
+    file_name = ""
+    for i in range(6):
+        if(i > len(temp_name) - 1):
+            file_name += " "
+        else:
+            file_name += temp_name[i]
+    header_record += file_name
+    header_record += "%06x"%start_adr + "%06x"%program_len
+    print(header_record)
+    writeRecord(out_file, header_record)
+    
+    
+    # while OPCODE != "END" do
+    while(current_line != "" and parsed["opcode"] != "end"):
+        
+        opc = parsed["opcode"]
+        if opc in ["clear", "svc", "tixr"]:
+            parsed["format"] = 2
+            parsed["operand1"] = parsed["operand"]
+            parsed["operand2"] = None
+        elif(opc == "rsub" and parsed["format"] == 1):
+            parsed["format"] = 3
+            parsed["extended"] = parsed["indirect"] = parsed["immediate"] = parsed["operand"] = None
+
+        if(parsed["opcode"] == "base"):
+            base_flag = True
+            if(DEC_ONLY.match(parsed["operand"]) != None):
+                base = int(parsed["operand"])
+            elif(LBL_ONLY.match(parsed["operand"]) != None):
+                 base = program_offsets[parsed["operand"]]
+            else:
+                 print(str(current_line_num)+ ":Invalid base operand value \'" + parsed["operand"] + "\':\n" + current_line)
+                 base = 0
+                 return 1
+        elif(parsed["opcode"] == "nobase"):
+            base_flag = False
+                 
+        elif(parsed["opcode"] in ["resb", "resw"]):
+            if(parsed["opcode"] == "resb"):
+                temp_adr = int(parsed["operand"])
+            elif(parsed["opcode"] == "resw"):
+                temp_adr = 3 * int(parsed["operand"])
+            current_adr += temp_adr
+            if((current_adr + temp_adr - start_adr) != program_len):
+                # TODO: WRITE TEXT BUFFER TO FILE!
+                if(text_buffer != ""):
+                    text_record += "%06x"%text_adr + "%02x"%text_len + text_buffer
+                    print(text_record)
+                    writeRecord(out_file, text_record)
+                # Initialize the text record
+                text_record = "T"    
+                text_adr = current_adr #(AAA)
+#                extra_adr = 0
+                text_len = 0 #(S)
+                text_buffer = ""
+
+        elif(parsed["opcode"] == "byte"):
+            if not initialized:
+                # Initialize the text record
+                text_record = "T"    
+                text_adr = current_adr #(AAA)
+                text_len = 0 #(S)
+                text_buffer = ""
+                initialized = True
+                
+            if "operand" in parsed:
+                # If we are working with characters, each char is a byte so add len of operand
+                if(parsed["operand"].split('\'')[0] == "c"):
+                    for c in current_line.split('\'')[1]:
+                        text_buffer += "%02x"%ord(c)
+                        text_len += 1
+                        current_adr += 1
+                        if(text_len >= 64):
+                            text_record += "%06x"%text_adr + "%02x"%text_len + text_buffer
+                            # TODO: WRITE TEXT BUFFER TO FILE!
+                            print(text_record)
+                            writeRecord(out_file, text_record)
+                            
+                            # Initialize the text record
+                            text_record = "T"    
+                            text_adr = current_adr #(AAA)
+#                            extra_adr = 0
+                            text_len = 0 #(S)
+                            text_buffer = ""
+                            pass
+                # If we are working with the actual value, each digit is a nybble so div by 2
+                elif(parsed["operand"].split('\'')[0] == "x"):
+                    instruction_buffer = processByte(parsed["operand"].split('\'')[1])
+#                    text_len += len(processByte(parsed["operand"].split('\'')[1])) / 2
+                    for i in range(len(instruction_buffer)/2):
+                        temp_byte = instruction_buffer[:2]
+                        instruction_buffer = instruction_buffer[2:]
+                        text_buffer += temp_byte
+                        text_len += 1
+                        current_adr += 1
+                        if(text_len >= 64):
+                            text_record += "%06x"%text_adr + "%02x"%text_len + text_buffer
+                            # TODO: WRITE TEXT BUFFER TO FILE!
+                            print(text_record)
+                            writeRecord(out_file, text_record)
+                            
+                            # Initialize the text record
+                            text_record = "T"    
+                            text_adr = current_adr #(AAA)
+                            #extra_adr = 0 #(AAA)
+                            text_len = 0 #(S)
+                            text_buffer = ""
+                            pass
+                else:
+                    if(int(parsed["operand"]) < 0 or int(parsed["operand"]) > 0xff):
+                        print(str(current_line_num) + ":Constant out of byte range:\n" + current_line)
+                        return 1
+                    else:
+                        text_buffer += "%02x"%int(parsed["operand"])
+                        text_len += 1
+                        current_adr += 1
+                        if(text_len >= 64):
+                            text_record += "%06x"%text_adr + "%02x"%text_len + text_buffer
+                            # TODO: WRITE TEXT BUFFER TO FILE!
+                            print(text_record)
+                            writeRecord(out_file, text_record)
+                            
+                            # Initialize the text record
+                            text_record = "T"    
+                            text_adr = current_adr #(AAA)
+                            #extra_adr = 0
+                            text_len = 0 #(S)
+                            text_buffer = ""
+                            pass
+                    
+        elif(parsed["opcode"] == "word"):
+            if not initialized:
+                # Initialize the text record
+                text_record = "T"    
+                text_adr = current_adr #(AAA)
+                text_len = 0 #(S)
+                text_buffer = ""
+                initialized = True
+            text_buffer += "%06x"%int(parsed["operand"])
+            text_len += 3
+            current_adr += 3
+                 
+        elif(parsed["format"] == 1):
+            if not initialized:
+                # Initialize the text record
+                text_record = "T"    
+                text_adr = current_adr #(AAA)
+                text_len = 0 #(S)
+                text_buffer = ""
+                initialized = True
+            current_adr += 1
+            instruction_buffer = OP_DICT[parsed["opcode"]].opcode
+            text_buffer += "%02x"%instruction_buffer
+            text_len += 1
+            if(text_len >= 64):
+                text_record += "%06x"%text_adr + "%02x"%text_len + text_buffer
+                # TODO: WRITE TEXT BUFFER TO FILE!
+                print(text_record)
+                writeRecord(out_file, text_record)
+                
+                # Initialize the text record
+                text_record = "T"    
+                text_adr = current_adr  #(AAA)
+                #extra_adr = 0 #(AAA)
+                text_len = 0 #(S)
+                text_buffer = ""
+                instruction_buffer = ""
+                pass
+            
+        elif(parsed["format"] == 2):
+            if not initialized:
+                # Initialize the text record
+                text_record = "T"    
+                text_adr = current_adr #(AAA)
+                text_len = 0 #(S)
+                text_buffer = ""
+                initialized = True
+            current_adr += 2
+            #TODO: Type-check the registers. 
+            opc = parsed["opcode"]
+            reg1 = 0
+            reg2 = 0
+            instruction_buffer = ""
+            
+            if(opc == "svc"):
+                if(DEC_ONLY.match(parsed["operand1"]) == None):
+                   print(str(current_line_num) + ":Expected decimal constant: \'" + parsed["operand1"] + "\':\n" + current_line)
+                   reg1 = 0
+                   return 1
+                elif(int(parsed["operand1"]) > 15 or int(parsed["operand1"]) < 0):
+                   print(str(current_line_num) + ":Constant out of range (0-15): \'" + parsed["operand1"] + "\':\n" + current_line)
+                   reg1 = 0
+                   return 1
+                reg1 = int(parsed["operand1"])
+                reg2 = 0
+            elif opc in ["clear", "tixr"]:
+                if not parsed["operand1"] in REGISTERS:
+                    print(str(current_line_num) + ":Invalid operand. Please use a register: \'" + parsed["operand1"] + "\':\n" + current_line)
+                    reg1 = 0
+                    return 1
+                reg1 = REGISTERS.index(parsed["operand1"])
+                reg2 = 0
+            elif opc in ["shiftl", "shiftr"]:
+                if not parsed["operand1"] in REGISTERS:
+                    print(str(current_line_num) + ":Expected a register: \'" + parsed["operand1"] + "\':\n" + current_line)
+                    reg1 = 0
+                    return 1
+                reg1 = REGISTERS.index(parsed["operand1"])
+                if(DEC_ONLY.match(parsed["operand2"]) == None):
+                    print(str(current_line_num) + "Expected a constant value:\n" + current_line)
+                    reg2 = 0
+                    return 1
+                reg2 = int(parsed["operand2"]) - 1
+            else:
+                if not parsed["operand1"] in REGISTERS and parsed["operand2"] in REGISTERS:
+                    print(str(current_line_num) + ":Expected two REGISTERS:\n" + current_line)
+                    reg1 = 0
+                    return 1
+                reg1 = REGISTERS.index(parsed["operand1"])
+                reg2 = REGISTERS.index(parsed["operand2"])
+                
+            instruction_buffer = "%02x"%OP_DICT[opc].opcode + "%01x"%reg1 +  "%01x"%reg2
+            for i in range(len(instruction_buffer)/2):
+                temp_byte = instruction_buffer[:2]
+                instruction_buffer = instruction_buffer[2:]
+                text_buffer += temp_byte
+                text_len += 1
+                if(text_len >= 64):
+                    text_record += "%06x"%text_adr + "%02x"%text_len + text_buffer
+                    # TODO: WRITE TEXT BUFFER TO FILE!
+                    print(text_record)
+                    writeRecord(out_file, text_record)
+                    
+                    # Initialize the text record
+                    text_record = "T"    
+                    text_adr = current_adr #(AAA)
+                    #extra_adr = 0 #(AAA)
+                    text_len = 0 #(S)
+                    text_buffer = ""
+                    pass
+                
+        elif(parsed["format"] == 4):
+            if not initialized:
+                # Initialize the text record
+                text_record = "T"    
+                text_adr = current_adr #(AAA)
+                text_len = 0 #(S)
+                text_buffer = ""
+                initialized = True
+            current_adr += 4
+            (N, I, X, B, P, E) = (1, 1, 0, 0, 0, 1)
+            if(parsed["immediate"] != None and parsed["indirect"] != None):
+                print(str(current_line) + ":Cannot have both indirect and immediate modes active:\n" + current_line)
+                return 1
+            elif(parsed["immediate"] != None):
+                N = 0
+            elif(parsed["indirect"] != None):
+                I = 0
+            if(parsed["extended"] != None):
+                X = 1
+            opc = parsed["opcode"]
+            temp_adr = 0
+            instruction_buffer = ""
+            
+            if(DEC_ONLY.match(parsed["operand"]) != None):
+                temp_adr = int(parsed["operand"])
+            elif(HEX_ONLY.match(parsed["operand"]) != None):
+                temp_adr = stringToHex(parsed["operand"])
+            elif(LBL_ONLY.match(parsed["operand"]) != None):
+                if parsed["operand"] in program_offsets:
+                    temp_adr = program_offsets[parsed["operand"]]
+                else:
+                    print(str(current_line_num) + ":Address invalid:\n" + current_line)
+                    temp_adr = 0
+                    return 1
+            if(temp_adr < 0 or temp_adr >= 2**20):
+                # Change the format to 3 so we can see if it's possible to do this with pc or based addressing.
+                # If we aren't supposed to check for format 3, then print an error and return right here
+                print(str(current_line_num) + ":Address out of range:\n"+ current_line)
+                temp_adr = 0
+                return 1
+                
+            opc = OP_DICT[opc].opcode | stringToBinary("000000" + str(N) + str(I))
+            instruction_buffer = "%02x"%opc + "%01x"%stringToBinary(str(X) + str(B) + str(P) + str(E)) + "%05x"%temp_adr
+            for i in range(len(instruction_buffer)/2):
+                temp_byte = instruction_buffer[:2]
+                instruction_buffer = instruction_buffer[2:]
+                text_buffer += temp_byte
+                text_len += 1
+                if(text_len >= 64):
+                    text_record += "%06x"%text_adr + "%02x"%text_len + text_buffer
+                    # TODO: WRITE TEXT BUFFER TO FILE!
+                    print(text_record)
+                    writeRecord(out_file, text_record)
+                    
+                    # Initialize the text record
+                    text_record = "T"    
+                    text_adr = current_adr #(AAA)
+                    #extra_adr = 0 #(AAA)
+                    text_len = 0 #(S)
+                    text_buffer = ""
+                    pass
+
+        elif(parsed["format"] == 3):
+            if not initialized:
+                # Initialize the text record
+                text_record = "T"    
+                text_adr = current_adr #(AAA)
+                text_len = 0 #(S)
+                text_buffer = ""
+                initialized = True
+            current_adr += 3
+            (N, I, X, B, P, E) = (1, 1, 0, 0, 0, 0)
+            if(parsed["immediate"] != None and parsed["indirect"] != None):
+                print(str(current_line) + ":Cannot have both indirect and immediate modes active:\n" + current_line)
+                return 1
+            elif("immediate" in parsed and parsed["immediate"] != None):
+                N = 0
+            elif("indirect" in parsed and parsed["indirect"] != None):
+                I = 0
+
+            if(parsed["extended"] != None):
+                X = 1
+            opc = parsed["opcode"]
+            temp_adr = 0
+            targ_adr = 0
+            instruction_buffer = ""
+
+            if(X == 1 and ((I == 1 and N == 0) or (I == 0 and N == 1))):
+                print(str(current_line_num) + ":Cannot have both immediate and indexed modes:\n" + current_line)
+                return 1
+            
+            if(parsed["operand"] == None):
+                targ_adr = 0
+            elif(DEC_ONLY.match(parsed["operand"]) != None):
+                targ_adr = int(parsed["operand"])
+            elif(HEX_ONLY.match(parsed["operand"]) != None):
+                targ_adr = stringToHex(parsed["operand"])
+            elif(LBL_ONLY.match(parsed["operand"]) != None):
+                if parsed["operand"] in program_offsets:
+                    targ_adr = program_offsets[parsed["operand"]]
+                else:
+                    print(str(current_line_num) + ":Address invalid:\n" + current_line)
+                    targ_adr = 0
+                    return 1
+
+            #if(targ_adr == 0):
+              #temp_disp =0
+              #PC-Relative:
+            #else:
+            if(parsed["opcode"] == "rsub"):
+                temp_disp =  0
+            else:
+                temp_disp = targ_adr - current_adr
+                if(temp_disp < -(2**11) or temp_disp >= 2**11):
+                    #Direct:
+                    temp_disp = targ_adr
+                    if(temp_disp < 0 or temp_disp >= 2**12):
+                        #Based:
+                        temp_disp = targ_adr - base
+                        if(temp_disp < 0 or temp_disp >= 2**12 or base_flag == False):
+                            #SIC:
+                            temp_disp = targ_adr
+                            #SIC works!
+                            if(temp_disp >= 0 and temp_disp < 2**15):
+                                N = 0
+                                I = 0
+                                # If nothing works:
+                            else:
+                                print(str(current_line_num) + ":Address out of range/invalid... couldn't get any addressing mode to handle it:\n" + current_line)
+                                temp_disp = 0
+                                return 1
+                            #Based works!
+                        else:
+                            B = 1
+                            #PC - relative works!
+                else:
+                    P = 1
+                    temp_disp = temp_disp & (1 << 12) - 1
+
+            opc = OP_DICT[opc].opcode | stringToBinary("000000" + str(N) + str(I))
+            #If we aren't SIC:
+            if(N == 1 or I == 1):
+                instruction_buffer = "%02x"%opc + "%01x"%stringToBinary(str(X) + str(B) + str(P) + str(E)) + "%03x"%temp_disp
+            else:
+                instruction_buffer = "%02x"%opc + "%04x"%((stringToBinary(str(X) + "000000000000000") | temp_disp))
+            for i in range(len(instruction_buffer)/2):
+                temp_byte = instruction_buffer[:2]
+                instruction_buffer = instruction_buffer[2:]
+                text_buffer += temp_byte
+                text_len += 1
+                if(text_len >= 64):
+                    text_record += "%06x"%text_adr + "%02x"%text_len + text_buffer
+                    # TODO: WRITE TEXT BUFFER TO FILE!
+                    print(text_record)
+                    writeRecord(out_file, text_record)
+                                    
+                    
+                    # Initialize the text record
+                    text_record = "T"    
+                    text_adr = current_adr + extra_adr #(AAA)
+                    extra_adr = 0 #(AAA)
+                    text_len = 0 #(S)
+                    text_buffer = ""
+                    pass
+            
+        (current_line, current_line_num, parsed, new_lbl) = getNextRealLine(f, current_line_num, current_adr, started)
+
+    
+    text_record += "%06x"%text_adr + "%02x"%text_len + text_buffer
+    if(text_buffer != ""):
+        print(text_record)
+        writeRecord(out_file, text_record)
+        
+
+    if(current_line != "" and parsed["opcode"] == "end"):
+        if("operand" not in parsed):
+            entry_point = start_adr
+        elif(LBL_ONLY.match(parsed["operand"]) != None):
+            if(parsed["operand"] in program_offsets):
+                entry_point = program_offsets[parsed["operand"]]
+            else:
+                print(str(current_line_num) + ":Undeclared label: \'" + parsed["operand"] + ":\' :\n" + current_line)
+                return 1
+        else:
+            if(stringToHex(parsed["operand"]) > 0xffffff):
+                print(str(current_line_num) + ":Constant exceeds word range:\n" + current_line)
+                return 1
+            entry_point = stringToHex(parsed["operand"])
+    else:
+        entry_point = start_adr
+
+    end_record = "E" + "%06x"%entry_point
+    print(end_record)
+    writeRecord(out_file, end_record)
+
+# ---------------------------------------------
+# \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+# ---------------------------------------------
+
+def main():
+    if(len(sys.argv) > 2):
+        (result, empty, program_offsets, program_len) = pass1(sys.argv[1])
+        if(result != 0):
+            sys.exit(result)
+        result = pass2(sys.argv[1], sys.argv[2], program_offsets, program_len)
+        sys.exit(result)
+    else:
+        print("Please enter a source file and output file.")
+        sys.exit(1)
+        
+if __name__ == "__main__":
+    main()

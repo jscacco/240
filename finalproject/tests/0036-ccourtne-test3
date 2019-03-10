@@ -1,0 +1,2 @@
+line2:	byte	c'hi    there  '
+hello: rsub

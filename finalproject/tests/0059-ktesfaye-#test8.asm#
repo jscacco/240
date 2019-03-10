@@ -1,0 +1,19 @@
+	. byte directives
+        .
+        . Weight: 5
+        .
+line1:	byte	C'1'
+line2:	byte	c'Computer Science'
+line3:	byte	X'01'
+line4:	byte	x'012'
+line5:	byte	x'0012'
+line6:	byte	X'0123456789ABCDEF'
+line7:	byte	X'0123456789abcdef'
+line8:	byte	255
+line9:	byte	+255
+line10:	byte	-1
+line11:	byte	-128       							                       
+line12:	end
+
+
+	 forma	t2 = re.compile(('^(<?P<label>[a-zA-z0-9]+:(\s)*)(?P<Mnemonic>[a-zA-Z]+(\s)*)(?P<operand1>(a|x|l|pc|sw|b|s|t|f)(\s)*,(?P<operand2>(a|x|l|pc|sw|b|s|t|f)(\s)*$'

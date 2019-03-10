@@ -1,0 +1,25 @@
+start 2000
+lda five
+sta alpha
+ldch charz
+stch c1
+
+alpha: resw 1
+five: word 5
+charz: byte C'Z'
+c1: resb 1
+
+c2:
+c3:
+lda                                   #5fak;ewhfoawehfljldjfksd
+sta alpha
+lda #90
+stch c1
+.
+.
+.
+stop: end
+
+	resw 2
+also: word 10
+

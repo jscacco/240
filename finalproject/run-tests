@@ -1,0 +1,26 @@
+#!/bin/bash
+cs240
+
+for file in tests/*; do
+    echo "--------------------"
+    echo $file
+    ./sasm $file my.obj
+    mystatus=$?
+    sasm $file auth.obj
+    authstatus=$?
+
+    if [[ $mystatus -eq 0 && $authstatus -eq 0 ]]; then
+	cmp my.obj auth.obj
+    elif [[ $mystatus -eq 1 && $authstatus -eq 1 ]]; then	
+	echo "Both raised errors."
+    else
+	echo "EXIT STATUSES DO NOT MATCH!"
+	echo -n "My status: "
+	echo $mystatus
+	echo -n "Auth status: "
+	echo $authstatus
+    fi
+done
+
+
+   

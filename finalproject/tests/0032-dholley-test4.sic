@@ -1,0 +1,11 @@
+	. Various special format instructions
+        .
+        . Weight: 5
+        .
+line1:	rsub
+line2:	svc	1
+line3:	clear	a
+line4:	tixr	b
+line5:	shiftl	x, 1
+line6:	shiftr	l, 2
+line7:	end

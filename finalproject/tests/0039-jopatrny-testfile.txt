@@ -1,0 +1,9 @@
+begin:	ldb	10
+	mul	20
+	ldl	value
+	ldx	value
+another:
+	+jeq	begin
+.this is a comment
+value:	word	256
+	end

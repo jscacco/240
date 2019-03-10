@@ -1,0 +1,10 @@
+prog: start		400
+begin:	ldb	10
+		mul	20
+		ldl	value
+		ldx	value
+.value:	byte	127
+another:	+jeq	begin
+value:	word	256
+end
+One thing that really stuck out to me was the fact that the modern images that we have of mummies and ancient Egyptian culture, in general, comes from such a wide range in time periods throughout their history. ﻿﻿﻿﻿I was wondering why this is the case, or if there is a particular time period that we are actually thinking about? It just seems so strange that there never seems to be a time when all of the imagery that we tend to think about regarding ancient Egypt coexisted.

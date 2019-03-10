@@ -1,0 +1,8 @@
+	start 1000
+ten:	word  10
+test:	ldl   10
+	compr a, x
+test1:	rsub
+	byte  c'123'
+hurdle:	mulf  test
+	end
